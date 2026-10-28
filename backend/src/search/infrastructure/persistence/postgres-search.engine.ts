@@ -49,6 +49,11 @@ type SearchRow = {
  *      When the text contains nothing but stopwords the tsquery is empty
  *      (`numnode = 0`); the filter on `q` is evaluated before the join, so the
  *      index is not even consulted and the result is an empty page.
+ *      The sort ends with `d.id DESC`: `(rank, created_at)` is not unique
+ *      (bulk uploads share a timestamp and equal text ranks equal), and
+ *      Postgres returns ties in arbitrary order, so without a unique key a
+ *      row could appear on two pages or on none. The outer query repeats the
+ *      same three keys so the page keeps the order the window was cut with.
  *   3. The outer SELECT joins the page's rows back to `documents` and only then
  *      runs `ts_headline`, which is expensive (it re-parses the document text).
  *      Running it on at most `pageSize` rows instead of on every match keeps
@@ -76,7 +81,7 @@ export class PostgresSearchEngine implements SearchEngine {
         WHERE numnode(q.query) > 0
           AND d.status = ${DocumentStatus.INDEXED}
           AND d.search_vector @@ q.query
-        ORDER BY rank DESC, d.created_at DESC
+        ORDER BY rank DESC, d.created_at DESC, d.id DESC
         LIMIT ${query.pageSize} OFFSET ${query.offset}
       )
       SELECT d.id,
@@ -94,7 +99,7 @@ export class PostgresSearchEngine implements SearchEngine {
              ts_headline(${TEXT_SEARCH_CONFIG}, d.title, q.query, ${TITLE_HEADLINE_OPTIONS}) AS title_highlight
       FROM hits
       JOIN documents d ON d.id = hits.id, q
-      ORDER BY hits.rank DESC, d.created_at DESC
+      ORDER BY hits.rank DESC, d.created_at DESC, d.id DESC
     `);
 
     const rows = result.rows;

@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { SEARCH_QUERY_LIMITS } from '../../domain/search-query';
 
 /**
@@ -16,6 +16,7 @@ export class SearchQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(SEARCH_QUERY_LIMITS.maxPage)
   page?: number;
 
   @IsOptional()

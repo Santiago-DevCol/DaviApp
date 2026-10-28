@@ -25,6 +25,22 @@ describe('SearchQuery', () => {
     expect(() => SearchQuery.create({ q: 'ok', page })).toThrow(InvalidSearchQueryError);
   });
 
+  it.each([10_001, 1e30])('rejects a page above the 10 000 cap (%p)', (page) => {
+    expect(() => SearchQuery.create({ q: 'ok', page })).toThrow(InvalidSearchQueryError);
+  });
+
+  it('accepts the page cap (10 000)', () => {
+    expect(SearchQuery.create({ q: 'ok', page: 10_000 }).page).toBe(10_000);
+  });
+
+  it('strips NUL bytes from the text (Postgres rejects them)', () => {
+    expect(SearchQuery.create({ q: 'gr\u0000úa\u0000' }).q).toBe('grúa');
+  });
+
+  it('rejects a text that is empty once NUL bytes are stripped', () => {
+    expect(() => SearchQuery.create({ q: '\u0000 \u0000' })).toThrow(InvalidSearchQueryError);
+  });
+
   it.each([0, 51, 2.5])('rejects a page size outside 1..50 (%p)', (pageSize) => {
     expect(() => SearchQuery.create({ q: 'ok', pageSize })).toThrow(InvalidSearchQueryError);
   });

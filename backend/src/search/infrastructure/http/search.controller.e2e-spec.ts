@@ -120,6 +120,31 @@ describe('SearchController (e2e)', () => {
     await request(app.getHttpServer()).get('/search').query({ q: 'ok', page: 'abc' }).expect(400);
   });
 
+  it.each(['10001', '1e30'])('returns 400 when page exceeds the cap (%s)', async (page) => {
+    const response = await request(app.getHttpServer())
+      .get('/search')
+      .query({ q: 'ok', page })
+      .expect(400);
+
+    expect(response.body.statusCode).toBe(400);
+    expect(JSON.stringify(response.body)).toContain('page');
+  });
+
+  it('strips NUL bytes from q before reaching the engine', async () => {
+    await request(app.getHttpServer()).get('/search').query({ q: 'gr\u0000ua' }).expect(200);
+
+    expect(engine.queries.at(-1)).toMatchObject({ q: 'grua' });
+  });
+
+  it('returns 400 when q contains only NUL bytes', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/search')
+      .query({ q: '\u0000' })
+      .expect(400);
+
+    expect(response.body).toMatchObject({ statusCode: 400, message: expect.stringContaining('"q"') });
+  });
+
   it('rejects unknown query parameters', async () => {
     await request(app.getHttpServer()).get('/search').query({ q: 'ok', sort: 'date' }).expect(400);
   });

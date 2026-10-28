@@ -9,6 +9,8 @@ export interface SearchQueryInput {
 export const SEARCH_QUERY_LIMITS = {
   maxLength: 200,
   defaultPage: 1,
+  /** Caps the OFFSET (maxPage * maxPageSize) far below bigint range; deeper pages have no use. */
+  maxPage: 10_000,
   defaultPageSize: 10,
   maxPageSize: 50,
 } as const;
@@ -26,7 +28,9 @@ export class SearchQuery {
   ) {}
 
   static create(input: SearchQueryInput): SearchQuery {
-    const q = (input.q ?? '').trim();
+    // Postgres rejects NUL bytes in text parameters ("invalid byte sequence"),
+    // and they carry no search meaning, so they are dropped before trimming.
+    const q = (input.q ?? '').replaceAll('\u0000', '').trim();
     if (q.length === 0) {
       throw new InvalidSearchQueryError('Search text "q" must not be empty');
     }
@@ -37,8 +41,10 @@ export class SearchQuery {
     }
 
     const page = input.page ?? SEARCH_QUERY_LIMITS.defaultPage;
-    if (!Number.isInteger(page) || page < 1) {
-      throw new InvalidSearchQueryError('"page" must be an integer greater than or equal to 1');
+    if (!Number.isInteger(page) || page < 1 || page > SEARCH_QUERY_LIMITS.maxPage) {
+      throw new InvalidSearchQueryError(
+        `"page" must be an integer between 1 and ${SEARCH_QUERY_LIMITS.maxPage}`,
+      );
     }
 
     const pageSize = input.pageSize ?? SEARCH_QUERY_LIMITS.defaultPageSize;

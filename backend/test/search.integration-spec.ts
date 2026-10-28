@@ -30,6 +30,8 @@ import {
 import { documents, NewDocumentRow } from '../src/shared/database/schema';
 
 const GENERATED_COUNT = 300;
+/** Rows sharing the same rank and `created_at`; more than any page size so ties span pages. */
+const TIED_COUNT = 40;
 const CONTAINER_START_TIMEOUT_MS = 180_000;
 
 const FIXTURE_IDS = {
@@ -101,6 +103,15 @@ const FIXTURES: NewDocumentRow[] = [
   ),
 ];
 
+/**
+ * Identical title, content and timestamp: every row gets the same `ts_rank_cd`
+ * and the same `created_at`, so only the id tiebreaker can order them. The word
+ * "berilo" is unique to these rows.
+ */
+const TIED_FIXTURES: NewDocumentRow[] = Array.from({ length: TIED_COUNT }, () =>
+  fixture(randomUUID(), 'Berilo: ficha de mantenimiento', 'Ficha de mantenimiento del berilo.'),
+);
+
 interface PlanNode {
   'Node Type': string;
   'Index Name'?: string;
@@ -146,6 +157,7 @@ describe('PostgresSearchEngine (integration)', () => {
       await db.insert(documents).values(generated.slice(offset, offset + 50));
     }
     await db.insert(documents).values(FIXTURES);
+    await db.insert(documents).values(TIED_FIXTURES);
     // Fresh statistics so the planner's choice reflects the real table.
     await db.execute(sql`ANALYZE documents`);
   }, CONTAINER_START_TIMEOUT_MS);
@@ -243,6 +255,31 @@ describe('PostgresSearchEngine (integration)', () => {
     expect(beyond.total).toBe(probe.total);
   });
 
+  it('paginates rows with identical rank and created_at deterministically (id tiebreaker)', async () => {
+    const pageSize = 7;
+    const pageCount = Math.ceil(TIED_COUNT / pageSize);
+
+    const walked: string[] = [];
+    for (let page = 1; page <= pageCount; page += 1) {
+      const result = await search('berilo', page, pageSize);
+      expect(result.total).toBe(TIED_COUNT);
+      walked.push(...result.items.map((hit) => hit.id));
+    }
+
+    // Every id exactly once: no repeats, nothing vanished between pages.
+    expect(walked).toHaveLength(TIED_COUNT);
+    expect(new Set(walked).size).toBe(TIED_COUNT);
+    const expectedIds = TIED_FIXTURES.map((row) => row.id as string);
+    expect([...walked].sort()).toEqual([...expectedIds].sort());
+    // The tiebreaker is `id DESC`; lowercase uuid text order equals Postgres' byte order.
+    expect(walked).toEqual([...expectedIds].sort().reverse());
+
+    // The same page twice yields the same ids in the same order.
+    const once = (await search('berilo', 3, pageSize)).items.map((hit) => hit.id);
+    const twice = (await search('berilo', 3, pageSize)).items.map((hit) => hit.id);
+    expect(twice).toEqual(once);
+  });
+
   it('returns only INDEXED documents', async () => {
     const page = await search('zafiro', 1, 50);
 
@@ -265,7 +302,7 @@ describe('PostgresSearchEngine (integration)', () => {
        SELECT d.id, ts_rank_cd(d.search_vector, q.query) AS rank, d.created_at, count(*) OVER () AS total
        FROM documents d, q
        WHERE numnode(q.query) > 0 AND d.status = 'INDEXED' AND d.search_vector @@ q.query
-       ORDER BY rank DESC, d.created_at DESC
+       ORDER BY rank DESC, d.created_at DESC, d.id DESC
        LIMIT 10 OFFSET 0`;
     const findIndexNode = (plan: PlanNode) => {
       const nodes = flattenPlan(plan);
