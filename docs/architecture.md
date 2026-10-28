@@ -174,9 +174,9 @@ existe ningún `LIKE` ni `ILIKE` en SQL; las únicas dos coincidencias son la pa
 
 | Medición | Resultado |
 |---|---|
-| Suite de integración, 20 consultas variadas sobre 300+ filas (`backend/test/search.integration-spec.ts`) | p50 18.2 ms · p95 23.1 ms · max 35.2 ms |
-| `pnpm --filter backend bench:search`, 200 peticiones, concurrencia 10 (`backend/scripts/bench-search.ts`) | servidor p50 17.8 ms · p95 45.2 ms · p99 57.1 ms · max 59.2 ms · ~394 req/s · 0 errores |
-| `EXPLAIN ANALYZE` para `kubernetes pod` | `Bitmap Index Scan on documents_search_idx`, 37 coincidencias, ejecución 5.9 ms |
+| Suite de integración, 20 consultas variadas sobre 340+ filas (`backend/test/search.integration-spec.ts`, Testcontainers) | p50 18.6 ms · p95 24.6 ms · max 34.6 ms |
+| `pnpm --filter backend bench:search`, 200 peticiones, concurrencia 10, contra el stack de `docker compose` (`backend/scripts/bench-search.ts`) | servidor p50 18.7 ms · p95 49.9 ms · p99 58.5 ms · max 61.7 ms · ~330 req/s · 0 errores |
+| `EXPLAIN (ANALYZE)` para `kubernetes pod` en el Postgres del stack (304 documentos indexados) | `Bitmap Index Scan on documents_search_idx` → `Bitmap Heap Scan` → `WindowAgg` → `Sort (top-N heapsort)`, 38 coincidencias, ejecución 5.0 ms |
 | Consulta solo con stopwords (`de la en`) | `One-Time Filter: false`: la CTE `hits` ni siquiera toca la tabla |
 
 Nota honesta sobre el planificador: con 300 filas y un término frecuente, PostgreSQL elige un
@@ -519,10 +519,10 @@ stateDiagram-v2
 
 | Tipo | Qué cubre | Cómo | Cantidad |
 |---|---|---|---|
-| Unitarias (backend) | Agregado `Document` y transiciones, resolución de formato, `UploadDocuments`, `IndexDocument`, `FailDocument`, `GetDocument`, `SearchQuery`, `SearchDocuments`, `EventReplayBuffer`, worker (último intento), extractor, `env.schema`, `HttpExceptionFilter`, `HealthController`, `EventsController` | Jest + ts-jest; fakes de puertos en memoria (`__fakes__/`); sin base de datos | Backend: 100 pruebas unitarias/e2e en 17 suites |
+| Unitarias (backend) | Agregado `Document` y transiciones, resolución de formato, `UploadDocuments`, `IndexDocument`, `FailDocument`, `GetDocument`, `SearchQuery`, `SearchDocuments`, `EventReplayBuffer`, worker (último intento), extractor, `env.schema`, `HttpExceptionFilter`, `HealthController`, `EventsController` | Jest + ts-jest; fakes de puertos en memoria (`__fakes__/`); sin base de datos | Backend: 112 pruebas unitarias/e2e en 17 suites |
 | E2E de controlador (backend) | `DocumentsController` (multipart, validación, 202, 404) y `SearchController` (DTO, filtros, headers) | `@nestjs/testing` + supertest con casos de uso reales sobre fakes | Incluidas en las 17 suites (`*.e2e-spec.ts`) |
-| Integración (backend) | Ranking título > contenido, mapeo de columnas, acentos y stemming español, frases entre comillas, highlight con `<mark>` y ≤ 2 fragmentos, paginación estable, solo `INDEXED`, stopwords, uso del GIN vía `EXPLAIN`, latencia p95 < 1 s sobre 20 consultas | Testcontainers `postgres:16-alpine` o `TEST_DATABASE_URL`; migraciones reales; 300 docs + fixtures | 10 pruebas en `backend/test/search.integration-spec.ts` |
-| Frontend | Validación de carga, `useSearch` (debounce y URL), `SearchPage`, `SearchResultCard`, `useDocumentEvents` (patch de caché, toasts, reconexión), `DocumentPage`, `highlight`, `status` | Vitest + Testing Library + MSW; `EventSource` simulado (`frontend/src/test/mockEventSource.ts`) | 36 pruebas en 8 archivos |
+| Integración (backend) | Ranking título > contenido, mapeo de columnas, acentos y stemming español, frases entre comillas, highlight con `<mark>` y ≤ 2 fragmentos, paginación estable, paginación determinista con 40 filas de rank y fecha idénticos (desempate por `id`), solo `INDEXED`, stopwords, uso del GIN vía `EXPLAIN`, latencia p95 < 1 s sobre 20 consultas | Testcontainers `postgres:16-alpine` o `TEST_DATABASE_URL`; migraciones reales; 300 docs + fixtures | 11 pruebas en `backend/test/search.integration-spec.ts` |
+| Frontend | Validación de carga, `useSearch` (debounce y URL), `SearchPage`, `SearchResultCard`, `useDocumentEvents` (patch de caché, toasts, reconexión y resincronización), `useUploadDocuments` (carrera evento-antes-del-202, alineación de `FormData`, polling), `UploadPage` (límite de 20 archivos), `DocumentPage`, `highlight`, `status` | Vitest + Testing Library + MSW; `EventSource` simulado (`frontend/src/test/mockEventSource.ts`) | 44 pruebas en 10 archivos |
 
 Comandos: `pnpm test` (unitarias de todos los paquetes), `pnpm --filter backend test:integration`
 (requiere Docker o `TEST_DATABASE_URL`), `pnpm lint` (`tsc --noEmit`).

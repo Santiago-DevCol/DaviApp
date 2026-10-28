@@ -28,18 +28,24 @@ imágenes, ni otros modelos).
 
 ## 2. Casos de uso de IA por etapa
 
-| Etapa | Qué hizo la IA | Qué hizo el candidato |
+Para ser precisos sobre quién hizo qué: "candidato" designa acciones de la persona; "sesión
+orquestadora" designa la instancia de Claude Code que el candidato dirigía y que verificaba de
+forma independiente el trabajo de los agentes escritores (re-ejecutando suites, reproduciendo
+`curl`, `psql`, bench y navegando la aplicación). La validación manual final del candidato se
+describe en la sección 4 y en el recorrido previo a la sustentación.
+
+| Etapa | Qué hizo la IA (agentes escritores) | Validación |
 |---|---|---|
-| Extracción de requisitos | El PDF del kata no tenía capa de texto; se renderizó a imágenes y se leyó visualmente página por página. Produjo la lista de requisitos, historias de usuario, estructura obligatoria y checklist del evaluador | Verificó la extracción contra el PDF original y la aprobó como base del plan |
-| Apoyo a decisiones | Presentó, una decisión por turno, las opciones con ventajas, desventajas y riesgos frente a los requisitos (400 ms - 1 s, sin `LIKE`, sin polling, 24 h de plazo, sustentación de 30 min) | Eligió cada una de las diez decisiones (PostgreSQL FTS, NestJS, SSE, pg-boss, React + Vite, hexagonal por capacidad, Drizzle, pnpm workspaces, TDD + Testcontainers, `spanish_unaccent`) |
-| Plan escrito | Redactó el plan con requisitos, decisiones justificadas, supuestos de ejecución, estructura de carpetas, esquema SQL, API y fases | Revisó y aprobó el plan y sus supuestos (10 MB, disco local, interpretación del SLO, nombres de estados) |
-| Scaffolding (fase 1) | pnpm workspaces, `@techdocs/shared`, NestJS 11 con `.env` validado por zod, filtro global de excepciones, Drizzle + migración inicial, `docker-compose.yml` con Postgres 16 | Validó `docker compose up` y la migración; vetó o aceptó desviaciones |
-| Implementación TDD (fases 2-4) | Dominio, casos de uso y adaptadores de `documents`, `search` y `notifications`, escribiendo primero la especificación que falla | Re-ejecutó las suites y revisó commits |
-| Pruebas de integración | Suite con Testcontainers para `PostgresSearchEngine`, incluida la aserción sobre `EXPLAIN` | Leyó los planes de ejecución y la salida de latencia |
-| Scripts de seed y bench | `backend/scripts/seed.ts` (300 documentos sintéticos reproducibles), `bench-search.ts`, `generate-sample-pdfs.ts` | Ejecutó el bench y conservó las cifras reales para `architecture.md` |
-| Frontend (fase 5) | SPA React + Vite: carga con metadatos por archivo, búsqueda con highlight seguro y paginación, visor con Markdown, SSE con parche de caché y toasts; 36 pruebas | Probó el flujo manualmente |
-| Revisión y refutación | Reviewers independientes por fase; refuters sobre los hallazgos críticos | Decidió qué hallazgos corregir y verificó las correcciones |
-| Documentación (fase 6) | Borradores de `docs/architecture.md`, `docs/ia.md` y `README.md` a partir del plan, el código y el log | Revisión final y responsabilidad del contenido en la sustentación |
+| Extracción de requisitos | El PDF del kata no tenía capa de texto; se renderizó a imágenes y se leyó visualmente página por página. Produjo la lista de requisitos, historias de usuario, estructura obligatoria y checklist del evaluador | Candidato: aprobó el plan escrito, que incorporaba esa extracción literal (sin requisitos inventados) |
+| Apoyo a decisiones | Presentó, una decisión por turno, las opciones con ventajas, desventajas y riesgos frente a los requisitos (400 ms - 1 s, sin `LIKE`, sin polling, 24 h de plazo, sustentación de 30 min) | Candidato: eligió cada una de las diez decisiones (PostgreSQL FTS, NestJS, SSE, pg-boss, React + Vite, hexagonal por capacidad, Drizzle, pnpm workspaces, TDD + Testcontainers, `spanish_unaccent`) |
+| Plan escrito | Redactó el plan con requisitos, decisiones justificadas, supuestos de ejecución, estructura de carpetas, esquema SQL, API y fases | Candidato: revisó y aprobó el plan y sus supuestos (10 MB, disco local, interpretación del SLO, nombres de estados) |
+| Scaffolding (fase 1) | pnpm workspaces, `@techdocs/shared`, NestJS 11 con `.env` validado por zod, filtro global de excepciones, Drizzle + migración inicial, `docker-compose.yml` con Postgres 16 | Sesión orquestadora: re-ejecutó las pruebas, comprobó commits y árbol limpio; revisión independiente detectó que el paquete compartido no se construía en un clon limpio |
+| Implementación TDD (fases 2-4) | Dominio, casos de uso y adaptadores de `documents`, `search` y `notifications`, escribiendo primero la especificación que falla | Sesión orquestadora: re-ejecutó las suites tras cada fase; revisiones y refutaciones independientes antes de cada corrección |
+| Pruebas de integración | Suite con Testcontainers para `PostgresSearchEngine`, incluida la aserción sobre `EXPLAIN` | Sesión orquestadora: reprodujo el `EXPLAIN (ANALYZE)` contra el Postgres del stack Docker |
+| Scripts de seed y bench | `backend/scripts/seed.ts` (300 documentos sintéticos reproducibles), `bench-search.ts`, `generate-sample-pdfs.ts` | Sesión orquestadora: reprodujo el bench contra el stack Docker; esas son las cifras de `architecture.md` |
+| Frontend (fase 5) | SPA React + Vite: carga con metadatos por archivo, búsqueda con highlight seguro y paginación, visor con Markdown, SSE con parche de caché y toasts; 44 pruebas | Sesión orquestadora: navegó la aplicación en el stack Docker (búsqueda con resaltado y latencia, visor, página de carga, indicador SSE); candidato: recorrido manual de la sección 5 antes de la sustentación |
+| Revisión y refutación | Reviewers independientes por fase; refuters sobre los hallazgos críticos | Sesión orquestadora: aplicó el protocolo (refutar antes de corregir, re-revisar el diff del fix); candidato: informado de cada hallazgo y de su corrección |
+| Documentación (fase 6) | Borradores de `docs/architecture.md`, `docs/ia.md` y `README.md` a partir del plan, el código y el log; el agente listó las afirmaciones que no pudo verificar | Sesión orquestadora: corrigió cifras y conteos con los valores reproducidos; candidato: revisión final y responsabilidad del contenido en la sustentación |
 
 ## 3. Prompts clave y cómo fueron refinados
 
@@ -114,7 +120,9 @@ sí se corrigieron (sección 4.2).
 
 ### 4.1 Qué hizo el candidato
 
-- Leyó los requisitos extraídos y los contrastó con el PDF.
+- Exigió que los requisitos se extrajeran del PDF sin inventar nada y aprobó el plan que los
+  incorporaba; el contraste final página por página con el PDF forma parte del recorrido de la
+  sección 5.
 - Tomó cada una de las diez decisiones de diseño a partir de los trade-offs presentados; la IA
   no eligió ninguna.
 - Aprobó el plan escrito y sus supuestos de ejecución (límite de 10 MB, almacenamiento en disco
@@ -167,11 +175,14 @@ final en una máquina distinta a la del desarrollo. Esa validación es del candi
 Lista de verificación que el candidato completa personalmente en un entorno limpio. Las casillas
 se dejan vacías a propósito: solo se marcan tras ejecutar cada paso.
 
+- [ ] Releer el PDF del kata página por página y contrastarlo con la sección de requisitos de
+      `docs/architecture.md` y con el checklist del evaluador.
 - [ ] Clonar el repositorio en una carpeta nueva y ejecutar `pnpm install`; confirmar que
       `packages/shared/dist/` existe al terminar (script `prepare`).
 - [ ] `docker compose up --build` desde cero; confirmar que las migraciones corren solas y que
       `GET /health` responde `200` con `database: up`.
-- [ ] `pnpm --filter backend db:seed` y comprobar que la tabla `documents` tiene 300 filas.
+- [ ] `docker compose run --rm seed` (stack Docker) o `pnpm --filter backend db:seed` (backend
+      en el host) y comprobar que la tabla `documents` tiene 300 filas.
 - [ ] Abrir la UI, ir a Cargar y subir `docs/samples/sample-spec.txt`,
       `docs/samples/sample-manual.md` y `docs/samples/sample-guide.pdf` con metadatos; recibir
       `202` y ver los tres en estado PROCESANDO.
