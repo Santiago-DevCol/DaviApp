@@ -145,3 +145,17 @@ docker-compose.yml  postgres + backend + frontend (+ opt-in seed profile)
 and `sample-blank.pdf`. The blank PDF has no extractable text and ends in
 `ERROR` with `"No extractable text found"`, which demonstrates the failure path
 in the UI and over SSE.
+
+## Troubleshooting
+
+- **Backend exits with `getaddrinfo ENOTFOUND postgres`**: the `postgres` container lost its
+  Compose network (it happens when a container survives a network recreation). Recreate it;
+  the data volume is kept:
+
+  ```bash
+  docker compose up -d --force-recreate postgres && docker compose up -d
+  ```
+
+- **Port 5432 already in use on the host**: `POSTGRES_PORT=5433 docker compose up --build`.
+  Containers always talk to Postgres on the internal port 5432, so the override only affects
+  host access.
