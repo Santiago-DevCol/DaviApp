@@ -53,6 +53,32 @@ describe('Document', () => {
     expect(document.content).toBeNull();
   });
 
+  it('clears any content when it transitions to ERROR', () => {
+    const base = createProcessingDocument();
+    const document = new Document({
+      id: base.id,
+      fileName: base.fileName,
+      title: base.title,
+      author: base.author,
+      category: base.category,
+      tags: [...base.tags],
+      version: base.version,
+      format: base.format,
+      storageKey: base.storageKey,
+      sizeBytes: base.sizeBytes,
+      status: DocumentStatus.PROCESSING,
+      errorMessage: null,
+      content: 'partially extracted text',
+      createdAt: base.createdAt,
+      updatedAt: base.updatedAt,
+    });
+
+    document.markFailed('Indexing failed after 4 attempts');
+
+    expect(document.status).toBe(DocumentStatus.ERROR);
+    expect(document.content).toBeNull();
+  });
+
   it.each([
     ['INDEXED', (d: Document) => d.markIndexed('x')],
     ['ERROR', (d: Document) => d.markFailed('boom')],

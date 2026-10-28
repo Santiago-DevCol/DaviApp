@@ -31,7 +31,7 @@ export interface CreateDocumentInput {
 /**
  * Aggregate root of the documents capability. Lifecycle:
  *   PROCESSING -> INDEXED (text extracted and stored)
- *   PROCESSING -> ERROR   (extraction or enqueue failed)
+ *   PROCESSING -> ERROR   (extraction failed, or indexing retries were exhausted)
  * Both end states are terminal.
  */
 export class Document {
@@ -123,10 +123,15 @@ export class Document {
     this._updatedAt = at;
   }
 
+  /**
+   * A failed document never exposes content: whatever was extracted before the
+   * failure is dropped so the persisted row carries no half-indexed text.
+   */
   markFailed(reason: string, at: Date = new Date()): void {
     this.assertTransitionTo(DocumentStatus.ERROR);
     this._status = DocumentStatus.ERROR;
     this._errorMessage = reason;
+    this._content = null;
     this._updatedAt = at;
   }
 

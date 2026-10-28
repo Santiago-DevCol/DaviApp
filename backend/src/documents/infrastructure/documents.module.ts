@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Env } from '../../shared/config/env.schema';
+import { FailDocumentUseCase } from '../application/fail-document.use-case';
 import { GetDocumentUseCase } from '../application/get-document.use-case';
 import { IndexDocumentUseCase } from '../application/index-document.use-case';
 import { UploadDocumentsUseCase } from '../application/upload-documents.use-case';
@@ -65,6 +66,12 @@ import { LocalFileStorage } from './storage/local-file.storage';
         extractor: TextExtractor,
         publisher: EventPublisher,
       ) => new IndexDocumentUseCase({ repository, storage, extractor, publisher }),
+    },
+    {
+      provide: FailDocumentUseCase,
+      inject: [DOCUMENT_REPOSITORY, EVENT_PUBLISHER],
+      useFactory: (repository: DocumentRepository, publisher: EventPublisher) =>
+        new FailDocumentUseCase({ repository, publisher }),
     },
     {
       provide: GetDocumentUseCase,

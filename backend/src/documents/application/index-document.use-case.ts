@@ -1,10 +1,9 @@
-import { DocumentStatusEvent } from '@techdocs/shared';
-import { Document } from '../domain/document';
 import { DocumentNotFoundError } from '../domain/errors';
 import { DocumentRepository } from '../domain/ports/document.repository';
 import { EventPublisher } from '../domain/ports/event-publisher';
 import { FileStorage } from '../domain/ports/file-storage';
 import { TextExtractor } from '../domain/ports/text-extractor';
+import { toDocumentStatusEvent } from './document-status-event.mapper';
 
 export interface IndexDocumentDependencies {
   repository: DocumentRepository;
@@ -19,7 +18,9 @@ const NO_TEXT_REASON = 'No extractable text found';
  * HU-01 step 2, executed by the background worker. Extraction problems are
  * deterministic (same bytes, same outcome), so they end the document in ERROR
  * and resolve normally: retrying would only burn worker time. Persistence
- * failures are transient and propagate so the queue retries the job.
+ * failures are transient and propagate so the queue retries the job; once the
+ * queue gives up (last attempt), the worker settles the document through
+ * `FailDocumentUseCase` so it never stays PROCESSING without a status event.
  */
 export class IndexDocumentUseCase {
   private readonly repository: DocumentRepository;
@@ -56,22 +57,10 @@ export class IndexDocumentUseCase {
     }
 
     await this.repository.update(document);
-    this.publisher.publish(toEvent(document));
+    this.publisher.publish(toDocumentStatusEvent(document));
   }
 }
 
 function describe(error: unknown): string {
   return error instanceof Error && error.message ? error.message : 'Unknown extraction error';
-}
-
-function toEvent(document: Document): DocumentStatusEvent {
-  const event: DocumentStatusEvent = {
-    id: document.id,
-    status: document.status,
-    occurredAt: document.updatedAt.toISOString(),
-  };
-  if (document.errorMessage) {
-    event.errorMessage = document.errorMessage;
-  }
-  return event;
 }
