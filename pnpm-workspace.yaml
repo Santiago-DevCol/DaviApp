@@ -4,5 +4,12 @@ packages:
   - packages/*
 allowBuilds:
   '@parcel/watcher': true
+  cpu-features: false
   esbuild: true
+  msw: false
+  protobufjs: false
+  ssh2: false
   unrs-resolver: true
+minimumReleaseAgeExclude:
+  - react-router-dom@7.18.5
+  - react-router@7.18.5
