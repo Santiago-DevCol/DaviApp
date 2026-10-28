@@ -1,0 +1,47 @@
+TECHNICAL SPECIFICATION: DOCUMENT UPLOAD AND INDEXING API
+Version 1.0.0 - Platform Engineering
+
+1. PURPOSE
+
+This specification defines the behaviour of the document ingestion endpoint of
+the Technical Docs Search service. It covers accepted formats, validation
+rules, the asynchronous indexing lifecycle and the status notification contract
+consumed by the web client.
+
+2. ACCEPTED FORMATS
+
+The endpoint accepts plain text (.txt), Markdown (.md) and PDF (.pdf) files up
+to 10 MiB each and up to 20 files per request. The file extension is
+authoritative; a declared MIME type outside the allow-list is rejected with
+HTTP 400. Files without a text layer (scanned PDFs) are accepted but end in the
+ERROR state with the message "No extractable text found".
+
+3. REQUEST CONTRACT
+
+POST /documents is a multipart/form-data request with repeated "files" parts and
+a single "metadata" field containing a JSON array aligned by index with the
+files. Each metadata entry holds title, author, category, tags and version.
+Validation failures return a structured error body with per-field details.
+
+4. LIFECYCLE
+
+Every accepted file receives a UUID and is persisted immediately in the
+PROCESSING state. The response is HTTP 202 Accepted and lists the tracking ids.
+A durable background job extracts the text, stores it in PostgreSQL and lets
+the generated search_vector column index it. The document then transitions to
+INDEXED or ERROR; both states are terminal. Transient failures (database
+unavailable) are retried up to three times with exponential backoff.
+
+5. NOTIFICATIONS
+
+Each transition publishes a DocumentStatusEvent on the internal event bus with
+the document id, the new status, an optional error message and the timestamp.
+A later phase exposes this stream over Server-Sent Events.
+
+6. NON-FUNCTIONAL REQUIREMENTS
+
+- Upload acknowledgement under 200 ms for a 10-file batch on commodity hardware.
+- Indexing of a 1 MiB text document under 2 seconds.
+- Search latency p95 under 100 ms with 300 indexed documents.
+- All domain logic covered by unit tests; the HTTP adapter covered by an
+  end-to-end test with in-memory ports.

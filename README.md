@@ -22,3 +22,6 @@ and change the port in `backend/.env` accordingly.
 
 The API listens on `http://localhost:3000`; `GET /health` reports the database status.
 SQL migrations under `backend/drizzle/` are applied automatically at startup.
+
+Load synthetic documents for demos and latency measurements with
+`pnpm --filter backend db:seed -- --count 300 --reset` (`--reset` truncates the `documents` table first).
