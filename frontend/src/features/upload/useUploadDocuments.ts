@@ -13,7 +13,10 @@ export function useUploadDocuments(options: UseUploadDocumentsOptions = {}) {
     mutationFn: uploadDocuments,
     onSuccess: (response, input) => {
       // Seed the cache so the tracked list (and any later SSE patch) has a
-      // document to work with before the first GET completes.
+      // document to work with before the first GET completes. The seed is
+      // then invalidated: the worker may have published the status event
+      // before the 202 arrived (it is skipped when nothing is cached), so the
+      // real status must be fetched regardless of the seeded PROCESSING.
       response.items.forEach((item, index) => {
         const metadata = input.metadata[index];
         const file = input.files[index];
@@ -31,7 +34,11 @@ export function useUploadDocuments(options: UseUploadDocumentsOptions = {}) {
           content: null,
           errorMessage: null,
         };
-        queryClient.setQueryData<DocumentDetail>(queryKeys.document(item.id), (existing) => existing ?? seed);
+        const key = queryKeys.document(item.id);
+        queryClient.setQueryData<DocumentDetail>(key, (existing) => existing ?? seed);
+        // Marks the seed stale; the tracked list refetches it as soon as it
+        // observes the key (or right away if a screen already does).
+        void queryClient.invalidateQueries({ queryKey: key });
       });
       options.onAccepted?.(response, input);
     },

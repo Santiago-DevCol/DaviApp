@@ -2,6 +2,7 @@ import { useQueries } from '@tanstack/react-query';
 import { DocumentStatus, type DocumentDetail, type UploadAcceptedItem } from '@techdocs/shared';
 import { useCallback, useState } from 'react';
 import { getDocument } from '@/api/documents.api';
+import { processingPollInterval } from '@/lib/polling';
 import { queryKeys } from '@/lib/queryKeys';
 
 export const TRACKED_UPLOADS_KEY = 'techdocs.trackedUploads';
@@ -47,7 +48,9 @@ function writeStorage(entries: TrackedUpload[]): void {
  * Uploads accepted in this browser tab, persisted in `sessionStorage` so a
  * reload keeps the list. Each tracked document is fetched once on mount,
  * covering status events missed while the tab was closed; later changes come
- * through the SSE cache patches.
+ * through the SSE cache patches. Documents still PROCESSING are also polled,
+ * so a status event lost or delivered before the upload was tracked can never
+ * leave a row stuck.
  */
 export function useTrackedUploads() {
   const [entries, setEntries] = useState<TrackedUpload[]>(readStorage);
@@ -85,6 +88,7 @@ export function useTrackedUploads() {
       queryFn: ({ signal }: { signal: AbortSignal }) => getDocument(entry.id, signal),
       staleTime: Infinity,
       refetchOnMount: true,
+      refetchInterval: processingPollInterval,
     })),
   });
 
