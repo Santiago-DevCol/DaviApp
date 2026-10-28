@@ -61,3 +61,51 @@ Format per entry: stage, tool, what was asked, what came back, human validation 
 - **Open risks disclosed by the agent (to discuss in the defense)**: no transaction between the
   `documents` insert and the job enqueue (crash window leaves a `PROCESSING` row; fix path is a
   unit-of-work using pg-boss `send` with the same transaction, or a stale-row sweeper).
+- **Independent review of Phase 2 (reliability lens)**: CRITICAL — when pg-boss retries were
+  exhausted the document stayed `PROCESSING` forever with no event. A refuter agent confirmed it
+  against the pg-boss 12 source. Fixed with `FailDocumentUseCase` + last-attempt detection in the
+  worker (TDD, 20 new tests); a scoped re-review verified the fix and noted two residual limits
+  (check-then-write guard, hard crash on the last attempt) that went to `architecture.md`.
+  WARNING fixed as well: multer decoded file names as latin1 (`Guía técnica.txt` was corrupted).
+
+## 2026-10-28 — Phases 3-4: search + SSE, and Phase 5: frontend (three agents in parallel)
+
+- **Orchestration change**: three writers ran at the same time on disjoint paths. Briefs gained
+  explicit rules: stage only your own paths, never `git add -A`, retry on `index.lock`, never
+  kill processes by port, only your own PIDs.
+- **Search**: Postgres FTS engine with a CTE so `ts_headline` runs only on the page rows;
+  Testcontainers suite (10 tests) including an `EXPLAIN` assertion on the GIN index; bench script.
+  The writer found by booting that Drizzle raw `execute()` returns timestamps as strings.
+- **SSE**: `@Sse('events')`, hub + ring replay buffer, `Last-Event-ID`; the writer discovered that
+  Nest auto-assigns ids to id-less messages, so the heartbeat carries the hub's last id.
+- **Frontend**: React + Vite SPA with TanStack Query, native `EventSource`, 36 Vitest tests, safe
+  highlight rendering (no `dangerouslySetInnerHTML`). Its E2E smoke hit `/search` while the
+  backend writer was mid-implementation (500), confirming the value of running the smoke again
+  at the end rather than trusting a single pass.
+- **Independent reviews (reliability lens, one per area)**:
+  - Backend CRITICAL: `ORDER BY rank, created_at` with `LIMIT/OFFSET` had no unique tiebreaker,
+    so pages could repeat or skip tied documents. Refuter confirmed against PostgreSQL semantics.
+    Fix: `d.id` as final sort key + an integration test with 40 identical-rank rows.
+  - Frontend CRITICAL: for multi-file batches the `INDEXED` event can arrive before the 202, the
+    cache has no entry yet, the 202 then seeds `PROCESSING` with `staleTime: Infinity`, and the
+    row never converges. Refuter confirmed the chain and quantified it (pg-boss polls every 2 s;
+    realistic for 20-file batches). Fix: refetch tracked ids after the 202 + 15 s poll while
+    `PROCESSING` + resync on SSE re-creation.
+  - WARNINGs fixed because they were cheap and demo-visible: unbounded `page` → 500, NUL byte
+    in `q` → 500, no id baseline on SSE connect, out-of-range page in the UI, files beyond 20
+    dropped silently.
+- **Human verification by the candidate's orchestrator session**: re-ran all suites after each
+  phase; browsed the Docker stack (search with highlights and latency badge, viewer, upload page,
+  live SSE indicator); reproduced the benchmark (p50 18.7 ms, p95 49.9 ms, p99 58.5 ms, 0 errors
+  over 200 requests at concurrency 10) and the `EXPLAIN ANALYZE` (Bitmap Index Scan on
+  `documents_search_idx`, 5.0 ms) directly against the containers.
+
+## 2026-10-28 — Phases 6-7: documentation and delivery (two agents)
+
+- **Docs**: `architecture.md` and `ia.md` drafted by an agent from the approved plan, the code
+  and this log; the agent listed every claim it could not verify itself (latency figures, test
+  counts) so the orchestrator could check them — the figures above are the reproduced ones.
+- **Docker**: multi-stage images, nginx with `proxy_buffering off` for SSE, compose with
+  healthchecks and a `seed` profile. Two real fixes found only by building: `**/storage` in
+  `.dockerignore` excluded the `infrastructure/storage` source folder; `expires` + `add_header`
+  produced a duplicate `Cache-Control`.
