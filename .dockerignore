@@ -1,0 +1,25 @@
+# Build context is the repository root (see docker-compose.yml) so the workspace
+# lockfile and packages/shared are available to both Dockerfiles.
+.git
+.gitattributes
+.atl
+**/node_modules
+**/dist
+**/coverage
+# Uploaded files written by the backend when run on the host (not the source
+# folder backend/src/**/storage).
+storage
+backend/storage
+**/.env
+**/*.log
+backend/test
+backend/src/**/*.spec.ts
+backend/src/**/*.e2e-spec.ts
+backend/src/**/__fakes__
+frontend/src/**/*.test.ts
+frontend/src/**/*.test.tsx
+frontend/src/test
+docs
+README.md
+**/Dockerfile
+docker-compose.yml

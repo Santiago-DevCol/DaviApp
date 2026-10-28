@@ -1,5 +1,12 @@
-# Local infrastructure for development.
-# The `backend` and `frontend` services are added in a later phase.
+# Full stack: `docker compose up --build`
+#   frontend  http://localhost:8080   (nginx, proxies /api -> backend)
+#   backend   http://localhost:3000   (NestJS, applies migrations at start)
+#   postgres  internal; host port ${POSTGRES_PORT:-5432} for local tooling
+#
+# Local development (backend/frontend on the host): `docker compose up -d postgres`
+# If host port 5432 is busy: `POSTGRES_PORT=5433 docker compose up -d postgres`
+#
+# Seed demo documents into the running stack: `docker compose run --rm seed`
 services:
   postgres:
     image: postgres:16-alpine
@@ -17,5 +24,65 @@ services:
       timeout: 5s
       retries: 10
 
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/techdocs
+      PORT: 3000
+      NODE_ENV: production
+      CORS_ORIGIN: http://localhost:8080
+      STORAGE_DIR: /data/storage
+      MAX_FILE_SIZE_BYTES: 10485760
+    ports:
+      - "3000:3000"
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # /health answers 503 when the database is down -> unhealthy.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # Opt-in: inserts synthetic documents (default 300) and writes their files to
+  # the shared storage volume. Reuses the backend `build` stage (sources + ts-node).
+  #   docker compose run --rm seed
+  #   docker compose run --rm seed --count 1000 --reset
+  seed:
+    profiles: [seed]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: build
+    working_dir: /app/backend
+    user: node
+    entrypoint: ["pnpm", "db:seed", "--"]
+    command: ["--count", "300"]
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/techdocs
+      STORAGE_DIR: /data/storage
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      backend:
+        condition: service_healthy
+
 volumes:
   pgdata:
+  storage:
