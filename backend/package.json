@@ -9,11 +9,12 @@
     "start:prod": "node dist/main",
     "test": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --watch",
-    "test:integration": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --config test/jest-integration.json --passWithNoTests",
+    "test:integration": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --config test/jest-integration.json --runInBand",
     "lint": "tsc -p tsconfig.json --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "ts-node scripts/migrate.ts",
-    "db:seed": "ts-node scripts/seed.ts"
+    "db:seed": "ts-node scripts/seed.ts",
+    "bench:search": "ts-node scripts/bench-search.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.8",
@@ -37,6 +38,7 @@
     "@nestjs/cli": "^11.0.24",
     "@nestjs/schematics": "^11.1.0",
     "@nestjs/testing": "^11.2.8",
+    "@testcontainers/postgresql": "^12.2.1",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/multer": "^2.3.0",
