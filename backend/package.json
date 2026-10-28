@@ -7,23 +7,28 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:integration": "jest --config test/jest-integration.json --passWithNoTests",
+    "test": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js",
+    "test:watch": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --watch",
+    "test:integration": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --config test/jest-integration.json --passWithNoTests",
     "lint": "tsc -p tsconfig.json --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "ts-node scripts/migrate.ts"
+    "db:migrate": "ts-node scripts/migrate.ts",
+    "db:seed": "ts-node scripts/seed.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.8",
     "@nestjs/config": "^12.0.1",
     "@nestjs/core": "^11.2.8",
+    "@nestjs/event-emitter": "^12.0.1",
     "@nestjs/platform-express": "^11.2.8",
     "@techdocs/shared": "workspace:*",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "drizzle-orm": "^0.45.4",
+    "multer": "^2.4.0",
+    "pdf-parse": "^2.4.5",
     "pg": "^8.23.1",
+    "pg-boss": "^12.38.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "zod": "^4.6.7"
@@ -34,11 +39,14 @@
     "@nestjs/testing": "^11.2.8",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
+    "@types/multer": "^2.3.0",
     "@types/node": "^24.19.2",
+    "@types/pdfkit": "^0.17.7",
     "@types/pg": "^8.23.1",
     "@types/supertest": "^7.2.1",
     "drizzle-kit": "^0.31.11",
     "jest": "^30.5.2",
+    "pdfkit": "^0.20.2",
     "supertest": "^7.3.1",
     "ts-jest": "^29.4.15",
     "ts-node": "^10.9.2",
@@ -47,8 +55,12 @@
   },
   "jest": {
     "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "moduleFileExtensions": ["js", "json", "ts"],
+    "testRegex": ".*\\.(spec|e2e-spec)\\.ts$",
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
     "transform": {
       "^.+\\.ts$": "ts-jest"
     },

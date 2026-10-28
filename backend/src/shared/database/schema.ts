@@ -38,6 +38,8 @@ export const documents = pgTable(
     category: text('category').notNull(),
     tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
     version: text('version').notNull(),
+    /** Original upload name, shown in the UI; the file itself lives under `storage_key`. */
+    fileName: text('file_name').notNull().default(''),
     format: text('format').notNull(),
     storageKey: text('storage_key').notNull(),
     sizeBytes: integer('size_bytes').notNull(),
