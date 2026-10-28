@@ -4,6 +4,7 @@
   "private": true,
   "packageManager": "pnpm@11.2.2",
   "scripts": {
+    "prepare": "pnpm --filter @techdocs/shared build",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
