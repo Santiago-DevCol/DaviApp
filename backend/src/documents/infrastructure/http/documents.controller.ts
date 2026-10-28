@@ -43,6 +43,9 @@ export class DocumentsController {
     FilesInterceptor('files', MAX_FILES_PER_UPLOAD, {
       storage: memoryStorage(),
       limits: { fileSize: MAX_FILE_SIZE_BYTES },
+      // Multer decodes part-header parameters as latin1 unless told otherwise,
+      // which turns "Guía técnica.txt" into mojibake; browsers send UTF-8.
+      defParamCharset: 'utf8',
     }),
   )
   async upload(

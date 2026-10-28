@@ -12,6 +12,9 @@ import { GetDocumentUseCase } from '../../application/get-document.use-case';
 import { UploadDocumentsUseCase } from '../../application/upload-documents.use-case';
 import { DocumentsController } from './documents.controller';
 
+/** Third id handed out by the generator; FIXTURE_IDS[2] must stay unknown for the GET 404 case. */
+const ACCENTED_UPLOAD_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+
 const validMetadata = (title: string) => ({
   title,
   author: 'Ana Torres',
@@ -32,7 +35,7 @@ describe('DocumentsController (e2e)', () => {
       repository,
       storage: new InMemoryFileStorage(),
       queue,
-      idGenerator: new FixedIdGenerator(FIXTURE_IDS),
+      idGenerator: new FixedIdGenerator([FIXTURE_IDS[0], FIXTURE_IDS[1], ACCENTED_UPLOAD_ID]),
     });
     const getDocument = new GetDocumentUseCase({ repository });
 
@@ -73,6 +76,21 @@ describe('DocumentsController (e2e)', () => {
         ],
       });
       expect(queue.enqueued).toEqual([FIXTURE_IDS[0], FIXTURE_IDS[1]]);
+    });
+
+    it('keeps accented file names intact (multipart names are decoded as UTF-8)', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/documents')
+        .field('metadata', JSON.stringify([validMetadata('Guía')]))
+        .attach('files', Buffer.from('Contenido'), {
+          filename: 'Guía técnica.txt',
+          contentType: 'text/plain',
+        })
+        .expect(202);
+
+      expect(response.body).toEqual({
+        items: [{ id: ACCENTED_UPLOAD_ID, status: DocumentStatus.PROCESSING, fileName: 'Guía técnica.txt' }],
+      });
     });
 
     it('returns a structured 400 when metadata is not a JSON array', async () => {
