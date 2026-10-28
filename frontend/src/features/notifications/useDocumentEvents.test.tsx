@@ -97,6 +97,23 @@ describe('useDocumentEvents', () => {
     expect(result.current).toBe('connecting');
   });
 
+  it('resyncs document and search queries when a re-created stream opens', async () => {
+    const { client } = setup();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+    // The very first connection has nothing to catch up on.
+    act(() => MockEventSource.latest().emitOpen());
+    expect(invalidate).not.toHaveBeenCalled();
+
+    // Events published during the outage are lost: the new stream resyncs.
+    act(() => MockEventSource.latest().emitError(true));
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+    act(() => MockEventSource.latest().emitOpen());
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.documents });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.searches });
+  });
+
   it('closes the stream on unmount', () => {
     const { unmount } = setup();
     const source = MockEventSource.latest();

@@ -64,11 +64,24 @@ export function useDocumentEvents(options: UseDocumentEventsOptions = {}): Conne
       if (event) applyEvent(event);
     };
 
+    let streams = 0;
+
     const connect = () => {
       if (disposed) return;
       setState('connecting');
+      // `Last-Event-ID` replay only covers the browser's own reconnects of a
+      // stream; anything published while no stream existed is lost, so a
+      // re-created stream refreshes what the app may be showing once it opens.
+      const resync = streams > 0;
+      streams += 1;
       source = createDocumentEventSource();
-      source.addEventListener('open', () => setState('open'));
+      source.addEventListener('open', () => {
+        setState('open');
+        if (resync) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.documents });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.searches });
+        }
+      });
       source.addEventListener('error', () => {
         if (!source) return;
         if (source.readyState === EventSource.CLOSED) {

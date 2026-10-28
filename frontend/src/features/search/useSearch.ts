@@ -70,17 +70,22 @@ export function useSearch(pageSize = DEFAULT_PAGE_SIZE): UseSearchResult {
     return () => clearTimeout(timer);
   }, [input, q, setParams]);
 
-  const setPage = useCallback(
-    (nextPage: number) => {
-      setParams((previous) => {
-        const updated = new URLSearchParams(previous);
-        if (nextPage > 1) updated.set('page', String(nextPage));
-        else updated.delete('page');
-        return updated;
-      });
+  const navigateToPage = useCallback(
+    (nextPage: number, replace = false) => {
+      setParams(
+        (previous) => {
+          const updated = new URLSearchParams(previous);
+          if (nextPage > 1) updated.set('page', String(nextPage));
+          else updated.delete('page');
+          return updated;
+        },
+        { replace },
+      );
     },
     [setParams],
   );
+
+  const setPage = useCallback((nextPage: number) => navigateToPage(nextPage), [navigateToPage]);
 
   const clear = useCallback(() => setInput(''), []);
 
@@ -90,6 +95,16 @@ export function useSearch(pageSize = DEFAULT_PAGE_SIZE): UseSearchResult {
     enabled: q.length > 0,
     placeholderData: keepPreviousData,
   });
+
+  // An out-of-range `?page=` (stale link, shrunk result set) lands on an
+  // empty page although there are results: replace it with the last valid
+  // page. With no results at all the empty state is the right answer.
+  const data = query.data;
+  useEffect(() => {
+    if (!data || data.total === 0 || data.items.length > 0 || data.page <= 1 || data.pageSize <= 0) return;
+    const lastPage = Math.max(1, Math.ceil(data.total / data.pageSize));
+    if (lastPage !== data.page) navigateToPage(lastPage, true);
+  }, [data, navigateToPage]);
 
   return {
     input,

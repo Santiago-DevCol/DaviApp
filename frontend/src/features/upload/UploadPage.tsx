@@ -46,6 +46,8 @@ function createPending(file: File, defaults: Partial<DocumentMetadataInput>): Pe
 
 export function UploadPage() {
   const [pending, setPending] = useState<PendingFile[]>([]);
+  /** Files from the last selection that did not fit in the batch. */
+  const [omitted, setOmitted] = useState(0);
   const [showErrors, setShowErrors] = useState(false);
   const { push } = useToasts();
   const tracked = useTrackedUploads();
@@ -56,6 +58,7 @@ export function UploadPage() {
         input.metadata.map((metadata) => metadata.title),
       );
       setPending([]);
+      setOmitted(0);
       setShowErrors(false);
       push({
         tone: 'info',
@@ -65,14 +68,16 @@ export function UploadPage() {
     },
   });
 
-  const addFiles = useCallback((files: File[]) => {
-    setPending((current) => {
-      const last = current[current.length - 1]?.metadata;
-      const room = Math.max(0, MAX_FILES_PER_UPLOAD - current.length);
+  const addFiles = useCallback(
+    (files: File[]) => {
+      const last = pending[pending.length - 1]?.metadata;
+      const room = Math.max(0, MAX_FILES_PER_UPLOAD - pending.length);
       const defaults = { author: last?.author, category: last?.category, version: last?.version };
-      return [...current, ...files.slice(0, room).map((file) => createPending(file, defaults))];
-    });
-  }, []);
+      setOmitted(Math.max(0, files.length - room));
+      setPending([...pending, ...files.slice(0, room).map((file) => createPending(file, defaults))]);
+    },
+    [pending],
+  );
 
   const errorsByKey = useMemo(() => {
     const map = new Map<string, MetadataErrors>();
@@ -115,6 +120,14 @@ export function UploadPage() {
           hint="Puedes seleccionar varios archivos a la vez."
         />
 
+        {omitted > 0 && (
+          <p role="status" className="text-xs text-amber-700">
+            {omitted === 1
+              ? `Se omitió 1 archivo: el máximo por lote es ${MAX_FILES_PER_UPLOAD}.`
+              : `Se omitieron ${omitted} archivos: el máximo por lote es ${MAX_FILES_PER_UPLOAD}.`}
+          </p>
+        )}
+
         {pending.length > 0 && (
           <form
             onSubmit={(event) => {
@@ -156,7 +169,14 @@ export function UploadPage() {
               <Button type="submit" disabled={!canSubmit} loading={upload.isPending}>
                 {sendable.length === 1 ? 'Enviar 1 archivo' : `Enviar ${sendable.length} archivos`}
               </Button>
-              <Button variant="secondary" onClick={() => setPending([])} disabled={upload.isPending}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setPending([]);
+                  setOmitted(0);
+                }}
+                disabled={upload.isPending}
+              >
                 Descartar todo
               </Button>
               {invalidFiles > 0 && (
