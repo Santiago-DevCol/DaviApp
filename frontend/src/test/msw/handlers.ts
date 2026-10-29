@@ -2,10 +2,12 @@ import {
   DocumentStatus,
   type ApiError,
   type DocumentDetail,
+  type InspectResponse,
+  type InspectedFile,
   type SearchResponse,
   type UploadAcceptedResponse,
 } from '@techdocs/shared';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 
 export const INDEXED_DOC: DocumentDetail = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -125,8 +127,53 @@ function apiError(statusCode: number, error: string, message: string, path: stri
   return { statusCode, error, message, timestamp: new Date().toISOString(), path };
 }
 
+/**
+ * Inspection suggestions keyed by file-name pattern:
+ * `fm-*.md` → front matter (title/author/version/tags), `*.pdf` → pdf-info with
+ * pages, `heur-*` → heuristic title, otherwise no suggestion. Handler-level:
+ * `fail-*` → 400, `slow-*` → answered after a delay.
+ */
+export function inspectFixture(file: File): InspectedFile {
+  const base = { fileName: file.name, sizeBytes: file.size };
+  const name = file.name.replace(/^slow-/, '');
+  if (name.startsWith('fm-') && name.endsWith('.md')) {
+    return {
+      ...base,
+      format: 'md',
+      source: 'front-matter',
+      suggested: { title: 'Guía desde front matter', author: 'Autora FM', version: '3.2.0', tags: ['fm'] },
+    };
+  }
+  if (name.endsWith('.pdf')) {
+    return {
+      ...base,
+      format: 'pdf',
+      pages: 12,
+      source: 'pdf-info',
+      suggested: { title: 'Título del PDF', author: 'Autor PDF' },
+    };
+  }
+  if (name.startsWith('heur-')) {
+    return { ...base, format: 'txt', source: 'heuristic', suggested: { title: 'Título heurístico' } };
+  }
+  return { ...base, format: 'txt', source: 'none', suggested: {} };
+}
+
 export const handlers = [
   http.get('*/api/health', () => HttpResponse.json({ status: 'ok' })),
+
+  http.post('*/api/documents/inspect', async ({ request }) => {
+    const form = await request.formData();
+    const files = form.getAll('files').filter((entry): entry is File => entry instanceof File);
+    if (files.some((file) => file.name.startsWith('fail-'))) {
+      return HttpResponse.json(apiError(400, 'Bad Request', 'Unsupported format', '/documents/inspect'), {
+        status: 400,
+      });
+    }
+    if (files.some((file) => file.name.startsWith('slow-'))) await delay(300);
+    const response: InspectResponse = { items: files.map(inspectFixture) };
+    return HttpResponse.json(response);
+  }),
 
   http.get('*/api/search', ({ request }) => {
     const url = new URL(request.url);
