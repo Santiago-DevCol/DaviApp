@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { Job, PgBoss } from 'pg-boss';
+import { describeError, errorStackFrames, isDependencyUnavailable } from '../../../shared/errors/error-details';
 import { PG_BOSS } from '../../../shared/queue/pg-boss.provider';
 import { FailDocumentUseCase } from '../../application/fail-document.use-case';
 import { IndexDocumentUseCase } from '../../application/index-document.use-case';
@@ -19,6 +20,25 @@ import {
 export type IndexDocumentJob = Job<IndexDocumentJobData> & { retryLimit?: number };
 
 const MAX_REASON_LENGTH = 300;
+const TSVECTOR_OVERFLOW = /too long for tsvector/i;
+const PUBLIC_FAILURES = {
+  tooLarge:
+    'El documento tiene demasiado texto para el índice de búsqueda. Reduce el tamaño o divídelo en partes.',
+  unavailable:
+    'No se pudo indexar por un problema temporal del servicio. Vuelve a intentarlo en unos minutos.',
+  generic:
+    'No se pudo indexar el documento. Verifica que el archivo no esté dañado e intenta nuevamente.',
+} as const;
+
+export function publicIndexingFailure(error: unknown): string {
+  if (TSVECTOR_OVERFLOW.test(describeError(error))) {
+    return PUBLIC_FAILURES.tooLarge;
+  }
+  if (isDependencyUnavailable(error)) {
+    return PUBLIC_FAILURES.unavailable;
+  }
+  return PUBLIC_FAILURES.generic;
+}
 
 /**
  * Consumes `index-document` jobs one at a time. A thrown error makes pg-boss
@@ -73,27 +93,30 @@ export class IndexDocumentWorker implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(`Document ${documentId} no longer exists; dropping job ${job.id}`);
         return;
       }
-      const message = describe(error);
+      const detail = describeError(error);
       this.logger.error(
-        `Indexing document ${documentId} failed (job ${job.id}, attempt ${attempt}): ${message}`,
-        error instanceof Error ? error.stack : undefined,
+        `Indexing document ${documentId} failed (job ${job.id}, attempt ${attempt}): ${detail}`,
+        errorStackFrames(error),
       );
       if (isLastAttempt(job)) {
-        await this.settleAsFailed(documentId, attempt, message);
+        await this.settleAsFailed(documentId, attempt, publicIndexingFailure(error));
       }
       throw error;
     }
   }
 
   private async settleAsFailed(documentId: string, attempts: number, message: string): Promise<void> {
-    const reason = `Indexing failed after ${attempts} attempts: ${message.slice(0, MAX_REASON_LENGTH)}`;
+    const reason = `No se pudo indexar después de ${attempts} intentos. ${message}`.slice(
+      0,
+      MAX_REASON_LENGTH,
+    );
     try {
       await this.failDocument.execute(documentId, reason);
       this.logger.warn(`Document ${documentId} settled as ERROR after ${attempts} attempts`);
     } catch (fallbackError) {
       this.logger.error(
-        `Could not settle document ${documentId} as ERROR: ${describe(fallbackError)}`,
-        fallbackError instanceof Error ? fallbackError.stack : undefined,
+        `Could not settle document ${documentId} as ERROR: ${describeError(fallbackError)}`,
+        errorStackFrames(fallbackError),
       );
     }
   }
@@ -102,8 +125,4 @@ export class IndexDocumentWorker implements OnModuleInit, OnModuleDestroy {
 function isLastAttempt(job: IndexDocumentJob): boolean {
   const retryLimit = job.retryLimit ?? INDEX_DOCUMENT_JOB_OPTIONS.retryLimit ?? 0;
   return job.retryCount >= retryLimit;
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

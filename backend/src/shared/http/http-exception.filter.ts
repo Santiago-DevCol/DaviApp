@@ -8,13 +8,15 @@ import {
 } from '@nestjs/common';
 import type { ApiError } from '@techdocs/shared';
 import type { Request, Response } from 'express';
+import { describeError, errorStackFrames, isDependencyUnavailable } from '../errors/error-details';
 
 type ErrorDescription = Omit<ApiError, 'timestamp' | 'path'>;
 
 /**
  * Normalizes every error into the `ApiError` contract shared with the frontend.
  * Validation errors keep their per-constraint messages under `details`;
- * unexpected errors are logged with their stack and answered with a generic 500.
+ * unexpected errors are logged with their stack (query parameters redacted) and
+ * answered with a generic 500. Dependency outages are answered with a 503.
  */
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -39,10 +41,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
       return this.describeHttpException(exception);
     }
 
-    this.logger.error(
-      exception instanceof Error ? exception.message : String(exception),
-      exception instanceof Error ? exception.stack : undefined,
-    );
+    if (isDependencyUnavailable(exception)) {
+      this.logger.error(
+        `Dependency unavailable: ${describeError(exception)}`,
+        errorStackFrames(exception),
+      );
+      return {
+        statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+        error: 'Service Unavailable',
+        message: 'El servicio no está disponible temporalmente. Intenta nuevamente en unos minutos.',
+      };
+    }
+
+    this.logger.error(describeError(exception), errorStackFrames(exception));
     return {
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       error: 'Internal Server Error',

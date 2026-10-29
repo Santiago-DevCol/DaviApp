@@ -159,3 +159,8 @@ in the UI and over SSE.
 - **Port 5432 already in use on the host**: `POSTGRES_PORT=5433 docker compose up --build`.
   Containers always talk to Postgres on the internal port 5432, so the override only affects
   host access.
+
+- **Postgres stops while the API is running**: the API stays up; `/health` and database-backed
+  routes answer `503` with a generic message, and the worker retries the job. Once Postgres is
+  back, the pool and pg-boss reconnect without restarting the backend. A document that exceeds
+  the 1 MB `tsvector` limit ends in `ERROR` with a user-facing message instead of SQL.

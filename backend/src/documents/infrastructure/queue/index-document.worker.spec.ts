@@ -4,10 +4,22 @@ import { FailDocumentUseCase } from '../../application/fail-document.use-case';
 import { IndexDocumentUseCase } from '../../application/index-document.use-case';
 import { DocumentNotFoundError } from '../../domain/errors';
 import { INDEX_DOCUMENT_JOB_OPTIONS } from './index-document.job';
-import { IndexDocumentJob, IndexDocumentWorker } from './index-document.worker';
+import {
+  IndexDocumentJob,
+  IndexDocumentWorker,
+  publicIndexingFailure,
+} from './index-document.worker';
 
 const DOCUMENT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const CONFIGURED_RETRY_LIMIT = INDEX_DOCUMENT_JOB_OPTIONS.retryLimit as number;
+const UNAVAILABLE_REASON =
+  'No se pudo indexar después de 4 intentos. No se pudo indexar por un problema temporal del servicio. Vuelve a intentarlo en unos minutos.';
+
+function withCause(message: string, cause: unknown): Error {
+  const error = new Error(message);
+  (error as { cause?: unknown }).cause = cause;
+  return error;
+}
 
 function jobAt(retryCount: number, retryLimit?: number): IndexDocumentJob {
   const job: IndexDocumentJob = {
@@ -73,10 +85,22 @@ describe('IndexDocumentWorker.handle', () => {
     await expect(worker.handle(jobAt(3, 3))).rejects.toBe(outage);
 
     expect(failDocument.execute).toHaveBeenCalledTimes(1);
-    expect(failDocument.execute).toHaveBeenCalledWith(
-      DOCUMENT_ID,
-      'Indexing failed after 4 attempts: connection terminated unexpectedly',
+    expect(failDocument.execute).toHaveBeenCalledWith(DOCUMENT_ID, UNAVAILABLE_REASON);
+  });
+
+  it('logs the internal cause with query parameters redacted', async () => {
+    const error = withCause(
+      'Failed query: update "documents" set status = $1\nparams: INDEXED,,term0 term1',
+      new Error('string is too long for tsvector (2779804 bytes, max 1048575 bytes)'),
     );
+    indexDocument.execute.mockRejectedValue(error);
+
+    await expect(worker.handle(jobAt(0, 3))).rejects.toBe(error);
+
+    const logged = errorLog.mock.calls[0][0] as string;
+    expect(logged).toContain('tsvector');
+    expect(logged).toContain('params: [redacted]');
+    expect(logged).not.toContain('term0');
   });
 
   it('falls back to the configured retry limit when the job carries none', async () => {
@@ -90,13 +114,15 @@ describe('IndexDocumentWorker.handle', () => {
     expect(failDocument.execute).toHaveBeenCalledTimes(1);
   });
 
-  it('truncates long error messages in the failure reason', async () => {
+  it('never copies the raw error into the failure reason', async () => {
     indexDocument.execute.mockRejectedValue(new Error('x'.repeat(1000)));
 
     await expect(worker.handle(jobAt(3, 3))).rejects.toThrow();
 
     const [, reason] = failDocument.execute.mock.calls[0] as [string, string];
-    expect(reason).toBe(`Indexing failed after 4 attempts: ${'x'.repeat(300)}`);
+    expect(reason).toContain('No se pudo indexar después de 4 intentos.');
+    expect(reason).not.toContain('x'.repeat(10));
+    expect(reason.length).toBeLessThanOrEqual(300);
   });
 
   it('drops the job when the document no longer exists', async () => {
@@ -117,6 +143,39 @@ describe('IndexDocumentWorker.handle', () => {
     expect(errorLog).toHaveBeenCalledWith(
       expect.stringContaining('database still down'),
       expect.anything(),
+    );
+  });
+});
+
+describe('publicIndexingFailure', () => {
+  it('hides the SQL and content of a tsvector overflow', () => {
+    const error = withCause(
+      'Failed query: update "documents" set status = $1\nparams: INDEXED,,term0 term1',
+      new Error('string is too long for tsvector (2779804 bytes, max 1048575 bytes)'),
+    );
+
+    const message = publicIndexingFailure(error);
+
+    expect(message).toContain('demasiado texto');
+    expect(message).not.toContain('update');
+    expect(message).not.toContain('term0');
+    expect(message).not.toContain('tsvector');
+  });
+
+  it('reports a dependency outage without internals', () => {
+    const error = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), {
+      code: 'ECONNREFUSED',
+    });
+
+    const message = publicIndexingFailure(error);
+
+    expect(message).toContain('problema temporal');
+    expect(message).not.toContain('ECONNREFUSED');
+  });
+
+  it('uses a generic message for unknown failures', () => {
+    expect(publicIndexingFailure(new Error('boom'))).toBe(
+      'No se pudo indexar el documento. Verifica que el archivo no esté dañado e intenta nuevamente.',
     );
   });
 });

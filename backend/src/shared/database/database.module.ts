@@ -2,14 +2,15 @@ import { Global, Inject, Logger, Module, OnModuleDestroy, OnModuleInit } from '@
 import { ConfigService } from '@nestjs/config';
 import { Pool } from 'pg';
 import { Env } from '../config/env.schema';
+import { describeError, errorStackFrames } from '../errors/error-details';
 import {
   createDatabase,
   createPool,
-  Database,
   DRIZZLE,
   MIGRATIONS_FOLDER,
   runMigrations,
 } from './database.provider';
+import type { Database } from './database.provider';
 
 const PG_POOL = Symbol('PG_POOL');
 
@@ -36,7 +37,14 @@ export class DatabaseModule implements OnModuleInit, OnModuleDestroy {
   constructor(
     @Inject(DRIZZLE) private readonly db: Database,
     @Inject(PG_POOL) private readonly pool: Pool,
-  ) {}
+  ) {
+    this.pool.on('error', (error) => {
+      this.logger.error(
+        `Idle PostgreSQL client error: ${describeError(error)}`,
+        errorStackFrames(error),
+      );
+    });
+  }
 
   async onModuleInit(): Promise<void> {
     this.logger.log(`Applying migrations from ${MIGRATIONS_FOLDER}`);

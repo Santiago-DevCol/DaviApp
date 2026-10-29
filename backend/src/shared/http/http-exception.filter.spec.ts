@@ -23,6 +23,10 @@ describe('HttpExceptionFilter', () => {
     filter = new HttpExceptionFilter();
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('maps an HttpException with validation details to a structured body', () => {
     const { host, response } = createHost('/documents');
     const exception = new BadRequestException(['title must be a string', 'tags must be an array']);
@@ -49,7 +53,7 @@ describe('HttpExceptionFilter', () => {
 
     filter.catch(exception, host);
 
-    expect(logSpy).toHaveBeenCalledWith('connection refused to 10.0.0.1', exception.stack);
+    expect(logSpy).toHaveBeenCalledWith('connection refused to 10.0.0.1', expect.anything());
     expect(response.status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
     const body = response.json.mock.calls[0][0];
     expect(body).toMatchObject({
@@ -60,5 +64,43 @@ describe('HttpExceptionFilter', () => {
     });
     expect(body.details).toBeUndefined();
     expect(JSON.stringify(body)).not.toContain('10.0.0.1');
+  });
+
+  it('maps a dependency outage to a 503 without leaking internals', () => {
+    const { host, response } = createHost('/search');
+    const exception = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), {
+      code: 'ECONNREFUSED',
+    });
+    const logSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    filter.catch(exception, host);
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Dependency unavailable'),
+      expect.anything(),
+    );
+    expect(response.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
+    const body = response.json.mock.calls[0][0];
+    expect(body).toMatchObject({
+      statusCode: 503,
+      error: 'Service Unavailable',
+      message: 'El servicio no está disponible temporalmente. Intenta nuevamente en unos minutos.',
+      path: '/search',
+    });
+    expect(JSON.stringify(body)).not.toContain('ECONNREFUSED');
+  });
+
+  it('redacts query parameters in the log', () => {
+    const { host } = createHost('/documents');
+    const exception = new Error(
+      'Failed query: update "documents" set status = $1\nparams: INDEXED,,term0 term1',
+    );
+    const logSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    filter.catch(exception, host);
+
+    const logged = logSpy.mock.calls[0][0] as string;
+    expect(logged).toContain('params: [redacted]');
+    expect(logged).not.toContain('term0');
   });
 });

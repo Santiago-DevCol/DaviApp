@@ -473,9 +473,12 @@ stateDiagram-v2
   (persistencia) que propagan la excepción para que pg-boss reintente.
 - Agotamiento de reintentos: el worker detecta el último intento
   (`job.retryCount >= retryLimit`) y, antes de relanzar el error, invoca `FailDocumentUseCase`
-  con el motivo truncado a 300 caracteres; así un job agotado nunca deja un documento en
-  `PROCESSING` sin evento de estado (`index-document.worker.ts`,
-  `fail-document.use-case.ts`).
+  con un motivo de dominio sanitizado (máximo 300 caracteres): nunca incluye la query, sus
+  parámetros ni el contenido. El detalle interno (incluida la causa de Postgres) queda en el
+  log, con los `params` de Drizzle redactados y solo los frames del stack. Si el texto supera
+  el límite de 1 MB de `tsvector`, el usuario ve un mensaje accionable en lugar del error de
+  la base. Así un job agotado nunca deja un documento en `PROCESSING` sin evento de estado
+  (`index-document.worker.ts`, `fail-document.use-case.ts`).
 - El job es idempotente: si el documento ya no está en `PROCESSING`, se retorna sin tocarlo.
 - La UI traduce los estados a `PROCESANDO / INDEXADO / ERROR` (`frontend/src/lib/status.ts`).
 
@@ -492,8 +495,10 @@ stateDiagram-v2
   ```
 
   Los errores de `ValidationPipe` conservan un mensaje por restricción en `details`; las
-  excepciones no HTTP se registran con stack y se responden como 500 genérico sin filtrar
-  detalles internos.
+  excepciones no HTTP se registran con su causa y los frames del stack (sin repetir el mensaje
+  y con los `params` de las queries redactados) y se responden con un mensaje genérico. Si el
+  fallo es de una dependencia (Postgres/pg-boss), se responde `503 Service Unavailable` con un
+  mensaje accionable en lugar de un `500`.
 - **Filtros de dominio por capacidad**: `DomainErrorFilter`
   (`backend/src/documents/infrastructure/http/domain-error.filter.ts`) traduce
   `DocumentNotFoundError → 404`, `UnsupportedDocumentFormatError`/`InvalidUploadBatchError → 400`,
@@ -519,8 +524,8 @@ stateDiagram-v2
 
 | Tipo | Qué cubre | Cómo | Cantidad |
 |---|---|---|---|
-| Unitarias (backend) | Agregado `Document` y transiciones, resolución de formato, `UploadDocuments`, `IndexDocument`, `FailDocument`, `GetDocument`, `SearchQuery`, `SearchDocuments`, `EventReplayBuffer`, worker (último intento), extractor, `env.schema`, `HttpExceptionFilter`, `HealthController`, `EventsController` | Jest + ts-jest; fakes de puertos en memoria (`__fakes__/`); sin base de datos | Backend: 112 pruebas unitarias/e2e en 17 suites |
-| E2E de controlador (backend) | `DocumentsController` (multipart, validación, 202, 404) y `SearchController` (DTO, filtros, headers) | `@nestjs/testing` + supertest con casos de uso reales sobre fakes | Incluidas en las 17 suites (`*.e2e-spec.ts`) |
+| Unitarias (backend) | Agregado `Document` y transiciones, resolución de formato, `UploadDocuments`, `IndexDocument`, `FailDocument`, `GetDocument`, `SearchQuery`, `SearchDocuments`, `EventReplayBuffer`, worker (último intento y mensajes públicos), `error-details`, extractor, `env.schema`, `HttpExceptionFilter`, `HealthController`, `EventsController` | Jest + ts-jest; fakes de puertos en memoria (`__fakes__/`); sin base de datos | Backend: 125 pruebas unitarias/e2e en 18 suites |
+| E2E de controlador (backend) | `DocumentsController` (multipart, validación, 202, 404) y `SearchController` (DTO, filtros, headers) | `@nestjs/testing` + supertest con casos de uso reales sobre fakes | Incluidas en las 18 suites (`*.e2e-spec.ts`) |
 | Integración (backend) | Ranking título > contenido, mapeo de columnas, acentos y stemming español, frases entre comillas, highlight con `<mark>` y ≤ 2 fragmentos, paginación estable, paginación determinista con 40 filas de rank y fecha idénticos (desempate por `id`), solo `INDEXED`, stopwords, uso del GIN vía `EXPLAIN`, latencia p95 < 1 s sobre 20 consultas | Testcontainers `postgres:16-alpine` o `TEST_DATABASE_URL`; migraciones reales; 300 docs + fixtures | 11 pruebas en `backend/test/search.integration-spec.ts` |
 | Frontend | Validación de carga, `useSearch` (debounce y URL), `SearchPage`, `SearchResultCard`, `useDocumentEvents` (patch de caché, toasts, reconexión y resincronización), `useUploadDocuments` (carrera evento-antes-del-202, alineación de `FormData`, polling), `UploadPage` (límite de 20 archivos), `DocumentPage`, `highlight`, `status` | Vitest + Testing Library + MSW; `EventSource` simulado (`frontend/src/test/mockEventSource.ts`) | 44 pruebas en 10 archivos |
 
@@ -560,3 +565,8 @@ pero todos son preguntas razonables de un evaluador senior.
    tipográficos (ver 4.4 para la ruta de migración).
 9. **Ejecución en un solo proceso** (API + worker + hub SSE) por simplicidad del demo; la sección
    4 documenta la separación.
+10. **Límite de `tsvector` (1 MB)**: un documento con alta diversidad léxica puede generar un
+    vector mayor y terminar en `ERROR`; el límite de subida de 10 MB no garantiza que el
+    contenido sea indexable. El usuario recibe un mensaje claro y el SQL no se expone.
+    Mitigación futura: indexar una porción normalizada del texto o mover el FTS a una tabla
+    dedicada.
