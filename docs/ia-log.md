@@ -293,3 +293,12 @@ Format per entry: stage, tool, what was asked, what came back, human validation 
 - **Verification**: `pnpm --filter frontend lint` (`tsc --noEmit`) clean, `vite build` OK,
   backend `Test Suites: 28 passed, 28 total` / `Tests: 206 passed, 206 total` (unit/e2e only);
   frontend `Test Files  20 passed (20)` / `Tests  115 passed (115)`.
+- **Flaky test fixed after the merge**: `useUploadDocuments.test.tsx` failed once in four full
+  runs (`expected [] to have a length of 1`) while passing alone. A render trace of the harness
+  showed the cause in 61 of 61 executions: `track` calls `setEntries` inside the mutation's
+  `onSuccess`, but React Query then notifies the `useMutation` store synchronously, so the
+  commit that flips `isSuccess` lands first and the tracked row is committed by the next
+  scheduler task. The tests read the tracked list right after `waitFor(isSuccess)`, which could
+  poll inside that gap under load. The three affected tests now await `isSuccess` and the
+  expected number of tracked entries in the same `waitFor`; the assertions are unchanged. The
+  hooks were not touched: the gap is one commit long and converges on its own.
