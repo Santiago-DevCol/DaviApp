@@ -16,6 +16,10 @@ describe('DocumentPage', () => {
       path: '/documents/:id',
     });
 
+    // Wait for the query to resolve first so DocumentBody is mounted before we
+    // start the timeout on the lazy MarkdownBody chunk.
+    await screen.findByRole('heading', { level: 1, name: INDEXED_DOC.title });
+
     expect(
       await screen.findByRole('heading', { level: 2, name: 'Requisitos' }, { timeout: 5000 }),
     ).toHaveAttribute('id', 'requisitos');
