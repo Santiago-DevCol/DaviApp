@@ -47,15 +47,15 @@ export function MetadataForm({
   return (
     <fieldset
       disabled={disabled}
-      className={`rounded-lg border bg-white p-4 ${fileError ? 'border-red-300' : 'border-slate-200'}`}
+      className={`flex flex-col gap-4 rounded-xl border bg-surface p-5 ${fileError ? 'border-bad' : 'border-line'}`}
     >
       <legend className="sr-only">Metadatos de {fileName}</legend>
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-900" title={fileName}>
+          <p className="truncate font-bold text-ink" title={fileName}>
             {fileName}
           </p>
-          <p className="text-xs text-slate-500">{formatBytes(sizeBytes)}</p>
+          <p className="text-[13px] text-ink-label">{formatBytes(sizeBytes)}</p>
         </div>
         <Button variant="quiet" onClick={onRemove} disabled={disabled}>
           Quitar
@@ -63,22 +63,24 @@ export function MetadataForm({
       </div>
 
       {fileError && (
-        <p role="alert" className="mb-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-800">
+        <p role="alert" className="text-[13px] text-bad">
           {fileError}
         </p>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <FormField id={field('title')} label="Título" required error={errors.title}>
-          <Input
-            id={field('title')}
-            value={value.title}
-            invalid={Boolean(errors.title)}
-            aria-describedby={describedBy(field('title'), errors.title)}
-            onChange={(event) => update({ title: event.target.value })}
-            maxLength={200}
-          />
-        </FormField>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="md:col-span-2">
+          <FormField id={field('title')} label="Título" required error={errors.title}>
+            <Input
+              id={field('title')}
+              value={value.title}
+              invalid={Boolean(errors.title)}
+              aria-describedby={describedBy(field('title'), errors.title)}
+              onChange={(event) => update({ title: event.target.value })}
+              maxLength={200}
+            />
+          </FormField>
+        </div>
         <FormField id={field('author')} label="Autor" required error={errors.author}>
           <Input
             id={field('author')}
@@ -122,7 +124,7 @@ export function MetadataForm({
             maxLength={200}
           />
         </FormField>
-        <div className="sm:col-span-2">
+        <div className="md:col-span-2">
           <FormField id={field('tags')} label="Etiquetas" error={errors.tags}>
             <TagsInput
               id={field('tags')}
