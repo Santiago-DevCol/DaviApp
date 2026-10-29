@@ -1,8 +1,8 @@
 node_modules/
 dist/
 .env
-storage/
-backend/storage/
+/storage/
+/backend/storage/
 coverage/
 .atl/
 *.log
