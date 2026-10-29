@@ -125,11 +125,25 @@ export const handlers = [
       });
     }
     const response: UploadAcceptedResponse = {
-      items: files.map((file, index) => ({
-        id: `33333333-3333-4333-8333-${String(index).padStart(12, '0')}`,
-        status: DocumentStatus.PROCESSING,
-        fileName: file.name,
-      })),
+      items: files.map((file, index) => {
+        const sent = metadata[index] as { version?: string } | undefined;
+        // Files named `dup-*` simulate a byte-identical re-upload of the indexed fixture.
+        if (file.name.startsWith('dup-')) {
+          return {
+            id: INDEXED_DOC.id,
+            status: INDEXED_DOC.status,
+            fileName: file.name,
+            version: INDEXED_DOC.version,
+            duplicateOf: { id: INDEXED_DOC.id, version: INDEXED_DOC.version },
+          };
+        }
+        return {
+          id: `33333333-3333-4333-8333-${String(index).padStart(12, '0')}`,
+          status: DocumentStatus.PROCESSING,
+          fileName: file.name,
+          version: sent?.version ?? '1.0.0',
+        };
+      }),
     };
     return HttpResponse.json(response, { status: 202 });
   }),

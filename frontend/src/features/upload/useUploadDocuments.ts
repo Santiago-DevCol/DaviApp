@@ -17,14 +17,17 @@ export function useUploadDocuments(options: UseUploadDocumentsOptions = {}) {
       // then invalidated: the worker may have published the status event
       // before the 202 arrived (it is skipped when nothing is cached), so the
       // real status must be fetched regardless of the seeded PROCESSING.
+      // Duplicates are skipped: the id belongs to a document that already
+      // exists, so there is nothing new to seed or poll.
       response.items.forEach((item, index) => {
         const metadata = input.metadata[index];
         const file = input.files[index];
-        if (!metadata || !file) return;
+        if (!metadata || !file || item.duplicateOf) return;
         const now = new Date().toISOString();
         const seed: DocumentDetail = {
           id: item.id,
           ...metadata,
+          version: item.version ?? metadata.version,
           format: fileFormat(item.fileName),
           fileName: item.fileName,
           sizeBytes: file.size,
