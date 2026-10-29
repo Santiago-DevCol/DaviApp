@@ -687,30 +687,46 @@ sin relación entre sí (una espera a la otra), nunca altera la corrección.
 ```mermaid
 sequenceDiagram
   autonumber
+
   participant UP as UploadDocumentsUseCase
   participant FS as LocalFileStorage
   participant UoW as DrizzleUnitOfWork
-  participant PG as PostgreSQL (misma conexión)
+  participant PG as PostgreSQL
 
-  UP->>UP: documentKey, sha256(bytes); findLatestByKey (atajo de duplicado)
-  UP->>FS: save(uuid.ext, buffer)   [fuera de la transacción]
+  UP->>UP: documentKey + sha256(bytes) + findLatestByKey
+  Note right of UP: atajo de duplicado
+
+  UP->>FS: save(uuid.ext, buffer)
+  Note right of FS: fuera de la transaccion
+
   UP->>UoW: run(fn)
+
   UoW->>PG: BEGIN
-  UoW->>PG: SELECT pg_advisory_xact_lock(hashtext(document_key))
-  UoW->>PG: SELECT ... WHERE document_key = $1 AND is_latest   [relectura bajo el lock]
-  alt misma huella que la última y no ERROR
-    UoW-->>UP: duplicateOf (sin escrituras)
+  UoW->>PG: pg_advisory_xact_lock(hashtext(document_key))
+  UoW->>PG: SELECT latest document by key
+  Note right of PG: relectura bajo el lock
+
+  alt misma huella que la ultima y no ERROR
+    UoW-->>UP: duplicateOf
+    Note right of UP: sin escrituras
     UP->>FS: delete(uuid.ext)
-  else nueva versión o documento nuevo
-    UoW->>PG: INSERT documents (PROCESSING, is_latest = true)
-    UoW->>PG: UPDATE documents SET is_latest = false WHERE id = anterior
-    UoW->>PG: INSERT pgboss.job (index-document)   [send con db externo]
+
+  else nueva version o documento nuevo
+
+    UoW->>PG: INSERT documents PROCESSING is_latest=true
+    UoW->>PG: UPDATE previous document is_latest=false
+    UoW->>PG: INSERT pgboss.job index-document
+    Note right of PG: send con db externo
+
     UoW->>PG: COMMIT
-    UoW-->>UP: { id, status, version }
+    UoW-->>UP: id,status,version
+
   end
+
   opt cualquier paso falla
     UoW->>PG: ROLLBACK
-    UP->>FS: delete(uuid.ext)   [best effort, warn si falla]
+    UP->>FS: delete(uuid.ext)
+    Note right of FS: best effort, warn si falla
   end
 ```
 
