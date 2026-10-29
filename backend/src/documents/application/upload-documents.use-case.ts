@@ -62,9 +62,9 @@ interface ValidatedUpload {
  *   2. otherwise, same identity -> new version. This covers other bytes, the
  *      same bytes as an ERROR latest (retry after a failed indexing) and the same
  *      bytes as an older superseded version (re-uploading old bytes is a
- *      rollback). The effective version never goes backwards: the sent version
- *      is kept when greater than the latest one, otherwise the latest gets a
- *      patch bump; the previous latest is superseded (readable, hidden from search).
+ *      rollback). The effective version never goes backwards (see
+ *      `resolveEffectiveVersion`); the previous latest is superseded (readable,
+ *      hidden from search).
  *   3. new identity -> new document, latest by definition.
  * `DocumentRepository.findByKeyAndHash` (and its index) is intentionally kept
  * but no longer drives this decision.
@@ -187,10 +187,17 @@ function sha256(buffer: Buffer): string {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
-/** Rule 2: a sent version only wins when it is strictly greater than the latest one. */
+/**
+ * Rule 2: `effective = max(sent, bumpPatch(latest))`, so the version never goes
+ * backwards. The sent string is kept verbatim when it wins (`v2.0.0` stays
+ * `v2.0.0`); an unparsable sent version sorts below everything and an
+ * unparsable latest core counts as `0.0.0`. The first version of an identity is
+ * always whatever was sent.
+ */
 function resolveEffectiveVersion(sent: string, latest: string | undefined): string {
-  if (latest === undefined || compareVersions(sent, latest) > 0) {
+  if (latest === undefined) {
     return sent;
   }
-  return bumpPatch(latest);
+  const bumped = bumpPatch(latest);
+  return compareVersions(sent, bumped) >= 0 ? sent : bumped;
 }

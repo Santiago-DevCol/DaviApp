@@ -193,6 +193,22 @@ describe('UploadDocumentsUseCase', () => {
       expect(repository.get(FIXTURE_IDS[0])?.isLatest).toBe(false);
     });
 
+    describe('effective version is monotonic: max(sent, patch bump of the latest)', () => {
+      it.each([
+        ['1.0.0', 'v2.0.0', 'v2.0.0'],
+        ['v1.2.3', '1.0.0', '1.2.4'],
+        ['1.0.0-beta', 'draft', '1.0.0'],
+        ['draft', 'draft', '0.0.1'],
+      ])('latest %s + sent %s -> %s', async (latest, sent, expected) => {
+        await upload('v1.txt', 'one', metadata('Manual', { version: latest }));
+
+        const response = await upload('v2.txt', 'two', metadata('Manual', { version: sent }));
+
+        expect(response.items[0].version).toBe(expected);
+        expect(repository.get(FIXTURE_IDS[1])?.version).toBe(expected);
+      });
+    });
+
     it('supersedes only the previous latest version, leaving older ones untouched', async () => {
       await upload('v1.txt', 'one', metadata('Manual', { version: '1.0.0' }));
       await upload('v2.txt', 'two', metadata('Manual', { version: '1.1.0' }));
