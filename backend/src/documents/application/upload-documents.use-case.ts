@@ -14,7 +14,7 @@ import { FileTooLargeError, InvalidUploadBatchError } from '../domain/errors';
 import { DocumentRepository } from '../domain/ports/document.repository';
 import { FileStorage } from '../domain/ports/file-storage';
 import { IdGenerator } from '../domain/ports/id-generator';
-import { JobQueue } from '../domain/ports/job-queue';
+import { TransactionContext, UnitOfWork } from '../domain/ports/unit-of-work';
 import { bumpPatch, compareVersions } from '../domain/semver';
 
 export interface UploadFileInput {
@@ -30,21 +30,30 @@ export interface UploadDocumentsInput {
   metadata: DocumentMetadataInput[];
 }
 
-export interface UploadDocumentsDependencies {
-  repository: DocumentRepository;
-  storage: FileStorage;
-  queue: JobQueue;
-  idGenerator: IdGenerator;
-  maxFileSizeBytes?: number;
+export interface UploadLogger {
+  warn(message: string): void;
 }
 
-const ENQUEUE_FAILURE_REASON = 'Failed to enqueue indexing job';
-const SUPERSEDE_FAILURE_REASON = 'Failed to supersede previous version';
+export interface UploadDocumentsDependencies {
+  /** Non-transactional reads (duplicate fast path before any side effect). */
+  repository: DocumentRepository;
+  unitOfWork: UnitOfWork;
+  storage: FileStorage;
+  idGenerator: IdGenerator;
+  maxFileSizeBytes?: number;
+  logger?: UploadLogger;
+}
 
 interface ValidatedUpload {
   file: UploadFileInput;
   metadata: DocumentMetadataInput;
   format: DocumentFormat;
+}
+
+interface UploadIdentity {
+  id: string;
+  documentKey: string;
+  contentHash: string;
 }
 
 /**
@@ -68,22 +77,32 @@ interface ValidatedUpload {
  *   3. new identity -> new document, latest by definition.
  * `DocumentRepository.findByKeyAndHash` (and its index) is intentionally kept
  * but no longer drives this decision.
- * Known limit: two concurrent uploads of the same identity are not serialized,
- * so both may end up `isLatest` (roadmap: advisory lock on the key).
+ *
+ * Effect order, per file: the bytes are written to storage first (outside any
+ * transaction, idempotent by `storageKey`); then one unit of work takes a
+ * per-key lock, re-reads the latest version under that lock (so two concurrent
+ * uploads of the same identity are serialized and exactly one stays latest),
+ * inserts the row, supersedes the previous latest and enqueues the indexing
+ * job. Either all of that commits or none of it does, so a row never exists
+ * without its job. When the unit of work fails the stored file is deleted on a
+ * best-effort basis; a file left behind by a crash between the two steps is
+ * removed later by the orphan sweeper.
  */
 export class UploadDocumentsUseCase {
   private readonly repository: DocumentRepository;
+  private readonly unitOfWork: UnitOfWork;
   private readonly storage: FileStorage;
-  private readonly queue: JobQueue;
   private readonly idGenerator: IdGenerator;
   private readonly maxFileSizeBytes: number;
+  private readonly logger: UploadLogger;
 
   constructor(deps: UploadDocumentsDependencies) {
     this.repository = deps.repository;
+    this.unitOfWork = deps.unitOfWork;
     this.storage = deps.storage;
-    this.queue = deps.queue;
     this.idGenerator = deps.idGenerator;
     this.maxFileSizeBytes = deps.maxFileSizeBytes ?? MAX_FILE_SIZE_BYTES;
+    this.logger = deps.logger ?? { warn: () => undefined };
   }
 
   async execute(input: UploadDocumentsInput): Promise<UploadAcceptedResponse> {
@@ -119,42 +138,61 @@ export class UploadDocumentsUseCase {
     const documentKey = buildDocumentKey(upload.metadata.title, upload.metadata.author);
     const contentHash = sha256(upload.file.buffer);
 
-    const previousLatest = await this.repository.findLatestByKey(documentKey);
-    if (previousLatest && isDuplicateOf(previousLatest, contentHash)) {
-      return {
-        id: previousLatest.id,
-        status: previousLatest.status,
-        fileName: upload.file.fileName,
-        version: previousLatest.version,
-        duplicateOf: { id: previousLatest.id, version: previousLatest.version },
-      };
+    // Fast path: an obvious duplicate costs no file write and no transaction.
+    // The decision is taken again under the lock below, which is the one that counts.
+    const seen = await this.repository.findLatestByKey(documentKey);
+    if (seen && isDuplicateOf(seen, contentHash)) {
+      return duplicateItem(seen, upload.file.fileName);
+    }
+
+    const id = this.idGenerator.next();
+    const storageKey = Document.storageKeyFor(id, upload.format);
+    await this.storage.save(storageKey, upload.file.buffer);
+
+    let outcome: UploadAcceptedItem;
+    try {
+      outcome = await this.unitOfWork.run((ctx) =>
+        this.acceptUnderLock(ctx, upload, { id, documentKey, contentHash }),
+      );
+    } catch (error) {
+      await this.deleteQuietly(storageKey);
+      throw error;
+    }
+    if (outcome.duplicateOf) {
+      // A concurrent upload of the same bytes won the lock; our row was never written.
+      await this.deleteQuietly(storageKey);
+    }
+    return outcome;
+  }
+
+  private async acceptUnderLock(
+    ctx: TransactionContext,
+    upload: ValidatedUpload,
+    identity: UploadIdentity,
+  ): Promise<UploadAcceptedItem> {
+    await ctx.lockDocumentKey(identity.documentKey);
+
+    const previousLatest = await ctx.repository.findLatestByKey(identity.documentKey);
+    if (previousLatest && isDuplicateOf(previousLatest, identity.contentHash)) {
+      return duplicateItem(previousLatest, upload.file.fileName);
     }
 
     const version = resolveEffectiveVersion(upload.metadata.version, previousLatest?.version);
     const document = Document.create({
-      id: this.idGenerator.next(),
+      id: identity.id,
       fileName: upload.file.fileName,
       metadata: { ...upload.metadata, version },
       format: upload.format,
       sizeBytes: upload.file.sizeBytes,
-      contentHash,
+      contentHash: identity.contentHash,
     });
 
-    await this.storage.save(document.storageKey, upload.file.buffer);
-    await this.repository.save(document);
-
-    // From here on the row exists: any failure leaves a visible ERROR trace
-    // instead of a document stuck in PROCESSING.
+    await ctx.repository.save(document);
     if (previousLatest) {
-      // Only after the new row exists, so a failed insert never leaves the key without a latest version.
       previousLatest.supersede();
-      await this.failDocumentOnError(document, SUPERSEDE_FAILURE_REASON, () =>
-        this.repository.update(previousLatest),
-      );
+      await ctx.repository.update(previousLatest);
     }
-    await this.failDocumentOnError(document, ENQUEUE_FAILURE_REASON, () =>
-      this.queue.enqueueIndexDocument(document.id),
-    );
+    await ctx.queue.enqueueIndexDocument(document.id);
 
     return {
       id: document.id,
@@ -164,15 +202,26 @@ export class UploadDocumentsUseCase {
     };
   }
 
-  private async failDocumentOnError(document: Document, reason: string, step: () => Promise<void>): Promise<void> {
+  private async deleteQuietly(storageKey: string): Promise<void> {
     try {
-      await step();
+      await this.storage.delete(storageKey);
     } catch (error) {
-      document.markFailed(reason);
-      await this.repository.update(document);
-      throw error;
+      const detail = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Could not delete ${storageKey} after a failed upload; the orphan sweeper will retry: ${detail}`,
+      );
     }
   }
+}
+
+function duplicateItem(latest: Document, fileName: string): UploadAcceptedItem {
+  return {
+    id: latest.id,
+    status: latest.status,
+    fileName,
+    version: latest.version,
+    duplicateOf: { id: latest.id, version: latest.version },
+  };
 }
 
 /**

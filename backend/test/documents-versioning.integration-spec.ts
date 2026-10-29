@@ -19,6 +19,7 @@ import { RecordingJobQueue } from '../src/documents/application/__fakes__/record
 import { UploadDocumentsUseCase } from '../src/documents/application/upload-documents.use-case';
 import { buildDocumentKey } from '../src/documents/domain/document-key';
 import { DrizzleDocumentRepository } from '../src/documents/infrastructure/persistence/drizzle-document.repository';
+import { DrizzleUnitOfWork } from '../src/documents/infrastructure/persistence/drizzle-unit-of-work';
 import { SearchQuery } from '../src/search/domain/search-query';
 import { PostgresSearchEngine } from '../src/search/infrastructure/persistence/postgres-search.engine';
 import {
@@ -164,8 +165,8 @@ describe('Document versioning (integration)', () => {
     const ids = [randomUUID(), randomUUID(), randomUUID()];
     const useCase = new UploadDocumentsUseCase({
       repository,
+      unitOfWork: new DrizzleUnitOfWork(db, () => queue),
       storage: new InMemoryFileStorage(),
-      queue,
       idGenerator: new FixedIdGenerator(ids),
     });
     const metadata = (version: string) => ({
@@ -221,8 +222,8 @@ describe('Document versioning (integration)', () => {
     const ids = [randomUUID(), randomUUID()];
     const useCase = new UploadDocumentsUseCase({
       repository,
+      unitOfWork: new DrizzleUnitOfWork(db, () => queue),
       storage: new InMemoryFileStorage(),
-      queue,
       idGenerator: new FixedIdGenerator(ids),
     });
     const buffer = Buffer.from('contenido que fallo al indexar', 'utf8');
