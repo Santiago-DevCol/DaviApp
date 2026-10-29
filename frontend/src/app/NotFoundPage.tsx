@@ -7,7 +7,7 @@ export function NotFoundPage() {
       title="Página no encontrada"
       description="La ruta solicitada no existe."
       action={
-        <Link to="/search" className="text-sm font-medium text-indigo-700 underline">
+        <Link to="/search" className="text-accent underline focus-ring">
           Ir a la búsqueda
         </Link>
       }
