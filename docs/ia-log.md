@@ -156,3 +156,16 @@ Format per entry: stage, tool, what was asked, what came back, human validation 
     utility and was renamed.
   - One writer reported honestly that two of its new test files were characterization tests
     (green against the old components) rather than red-first.
+- **Independent review (4R: risk, resilience, readability, reliability)**: four fresh-context
+  review sub-agents swept the redesign diff; no BLOCKER or CRITICAL finding. Warnings fixed in a
+  follow-up round by one writer (`f147b42`, `26ed4de`; suite now `Test Files  19 passed (19)` /
+  `Tests  98 passed (98)`): the outline links were plain fragment anchors, so a jump pushed a
+  history entry with null state and "Volver a resultados" lost the search query (reproduced in
+  the browser; the links now navigate through the router with `replace` and keep the state);
+  the heading parser stripped a trailing `#` that was part of the text (`## C#`), treated any
+  fence line as a toggle (a shorter inner fence or a `~~~` line closed a backtick block) and
+  could emit a duplicate id (`Pasos`, `Pasos 2`, `Pasos`); `border-dashed` doubled as a color
+  utility because the token was named `--color-dashed` (renamed `--color-dropzone`). Left as
+  info, not fixed: inline SVG icon props duplicated across three files, the two-way coupling
+  between `app/layout` and `features/viewer` for the outline, a comment claiming a single
+  `extractHeadings` pass, and the first-paint theme script being only string-checked by tests.
