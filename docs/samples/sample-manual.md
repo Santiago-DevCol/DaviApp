@@ -1,3 +1,10 @@
+---
+title: "Manual de operación: grúa torre GT-120"
+author: Departamento de Equipos Industriales
+version: 2.1.0
+category: manuals
+tags: [crane, safety, operations]
+---
 # Manual de operación: grúa torre GT-120
 
 **Versión 2.1.0 — Departamento de Equipos Industriales**

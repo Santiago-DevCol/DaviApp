@@ -13,9 +13,13 @@ import PDFDocument from 'pdfkit';
 
 const OUTPUT_DIR = path.resolve(__dirname, '../../docs/samples');
 
-function write(fileName: string, draw: (doc: PDFKit.PDFDocument) => void): Promise<void> {
+function write(
+  fileName: string,
+  info: PDFKit.DocumentInfo,
+  draw: (doc: PDFKit.PDFDocument) => void,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 56, info: { Title: fileName } });
+    const doc = new PDFDocument({ size: 'A4', margin: 56, info });
     const stream = createWriteStream(path.join(OUTPUT_DIR, fileName));
     stream.on('finish', () => resolve());
     stream.on('error', reject);
@@ -28,7 +32,15 @@ function write(fileName: string, draw: (doc: PDFKit.PDFDocument) => void): Promi
 async function main(): Promise<void> {
   await mkdir(OUTPUT_DIR, { recursive: true });
 
-  await write('sample-guide.pdf', (doc) => {
+  // The info dictionary feeds POST /documents/inspect (Title/Author become suggestions).
+  await write(
+    'sample-guide.pdf',
+    {
+      Title: 'Deployment Guide: Technical Docs Search API',
+      Author: 'Platform Engineering',
+      Subject: 'Kubernetes deployment of the search API',
+    },
+    (doc) => {
     doc.fontSize(20).text('Deployment Guide: Technical Docs Search API', { align: 'left' });
     doc.moveDown();
     doc.fontSize(11);
@@ -57,7 +69,7 @@ async function main(): Promise<void> {
     );
   });
 
-  await write('sample-blank.pdf', (doc) => {
+  await write('sample-blank.pdf', { Title: 'sample-blank.pdf' }, (doc) => {
     // Vector-only content: a scanned-looking page without any text objects.
     doc.rect(56, 56, 483, 300).lineWidth(2).stroke('#444444');
     doc.rect(80, 80, 200, 20).fill('#bbbbbb');
