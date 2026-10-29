@@ -12,6 +12,10 @@ export const envSchema = z.object({
   MAX_FILE_SIZE_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
   STORAGE_DIR: z.string().min(1).default('./storage'),
   CORS_ORIGIN: z.string().min(1).default('http://localhost:5173'),
+  /** A document PROCESSING for longer than this is settled as ERROR by the sweeper. */
+  STALE_PROCESSING_MINUTES: z.coerce.number().int().positive().default(15),
+  /** pg-boss cron expression for the stale document / orphan file sweep. */
+  SWEEP_CRON: z.string().min(1).default('*/5 * * * *'),
 });
 
 export type Env = z.infer<typeof envSchema>;

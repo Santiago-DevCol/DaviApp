@@ -11,6 +11,8 @@ describe('env schema', () => {
       MAX_FILE_SIZE_BYTES: 10485760,
       STORAGE_DIR: './storage',
       CORS_ORIGIN: 'http://localhost:5173',
+      STALE_PROCESSING_MINUTES: 15,
+      SWEEP_CRON: '*/5 * * * *',
     });
   });
 
