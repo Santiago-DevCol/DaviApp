@@ -1,6 +1,7 @@
 import {
   DocumentFormat,
   DocumentMetadataInput,
+  DocumentStatus,
   MAX_FILE_SIZE_BYTES,
   UploadAcceptedItem,
   UploadAcceptedResponse,
@@ -38,6 +39,7 @@ export interface UploadDocumentsDependencies {
 }
 
 const ENQUEUE_FAILURE_REASON = 'Failed to enqueue indexing job';
+const SUPERSEDE_FAILURE_REASON = 'Failed to supersede previous version';
 
 interface ValidatedUpload {
   file: UploadFileInput;
@@ -52,13 +54,20 @@ interface ValidatedUpload {
  * without leaving half-written state behind.
  *
  * Versioning rules, per file (identity = `documentKey`, fingerprint = SHA-256
- * of the uploaded bytes):
- *   1. same identity + same bytes  -> duplicate: nothing is created, the item
- *      points at the existing document (`duplicateOf`). Bulk retries are idempotent.
- *   2. same identity + other bytes -> new version: the sent version is kept
- *      when greater than the latest one, otherwise the latest gets a patch bump;
- *      the previous latest is superseded (readable, hidden from search).
- *   3. new identity                -> new document, latest by definition.
+ * of the uploaded bytes). Only the current latest version of the identity is
+ * consulted; older superseded rows never influence the decision:
+ *   1. latest version has the same bytes and is not ERROR -> duplicate: nothing
+ *      is created, the item points at that document (`duplicateOf`). Bulk
+ *      retries are idempotent.
+ *   2. otherwise, same identity -> new version. This covers other bytes, the
+ *      same bytes as an ERROR latest (retry after a failed indexing) and the same
+ *      bytes as an older superseded version (re-uploading old bytes is a
+ *      rollback). The effective version never goes backwards: the sent version
+ *      is kept when greater than the latest one, otherwise the latest gets a
+ *      patch bump; the previous latest is superseded (readable, hidden from search).
+ *   3. new identity -> new document, latest by definition.
+ * `DocumentRepository.findByKeyAndHash` (and its index) is intentionally kept
+ * but no longer drives this decision.
  * Known limit: two concurrent uploads of the same identity are not serialized,
  * so both may end up `isLatest` (roadmap: advisory lock on the key).
  */
@@ -110,18 +119,17 @@ export class UploadDocumentsUseCase {
     const documentKey = buildDocumentKey(upload.metadata.title, upload.metadata.author);
     const contentHash = sha256(upload.file.buffer);
 
-    const duplicate = await this.repository.findByKeyAndHash(documentKey, contentHash);
-    if (duplicate) {
+    const previousLatest = await this.repository.findLatestByKey(documentKey);
+    if (previousLatest && isDuplicateOf(previousLatest, contentHash)) {
       return {
-        id: duplicate.id,
-        status: duplicate.status,
+        id: previousLatest.id,
+        status: previousLatest.status,
         fileName: upload.file.fileName,
-        version: duplicate.version,
-        duplicateOf: { id: duplicate.id, version: duplicate.version },
+        version: previousLatest.version,
+        duplicateOf: { id: previousLatest.id, version: previousLatest.version },
       };
     }
 
-    const previousLatest = await this.repository.findLatestByKey(documentKey);
     const version = resolveEffectiveVersion(upload.metadata.version, previousLatest?.version);
     const document = Document.create({
       id: this.idGenerator.next(),
@@ -134,20 +142,19 @@ export class UploadDocumentsUseCase {
 
     await this.storage.save(document.storageKey, upload.file.buffer);
     await this.repository.save(document);
+
+    // From here on the row exists: any failure leaves a visible ERROR trace
+    // instead of a document stuck in PROCESSING.
     if (previousLatest) {
       // Only after the new row exists, so a failed insert never leaves the key without a latest version.
       previousLatest.supersede();
-      await this.repository.update(previousLatest);
+      await this.failDocumentOnError(document, SUPERSEDE_FAILURE_REASON, () =>
+        this.repository.update(previousLatest),
+      );
     }
-
-    try {
-      await this.queue.enqueueIndexDocument(document.id);
-    } catch (error) {
-      // The row already exists; leave a visible trace instead of a document stuck in PROCESSING.
-      document.markFailed(ENQUEUE_FAILURE_REASON);
-      await this.repository.update(document);
-      throw error;
-    }
+    await this.failDocumentOnError(document, ENQUEUE_FAILURE_REASON, () =>
+      this.queue.enqueueIndexDocument(document.id),
+    );
 
     return {
       id: document.id,
@@ -156,6 +163,24 @@ export class UploadDocumentsUseCase {
       version: document.version,
     };
   }
+
+  private async failDocumentOnError(document: Document, reason: string, step: () => Promise<void>): Promise<void> {
+    try {
+      await step();
+    } catch (error) {
+      document.markFailed(reason);
+      await this.repository.update(document);
+      throw error;
+    }
+  }
+}
+
+/**
+ * Rule 1: a duplicate is the current latest version with the same bytes, unless
+ * that version failed (ERROR), in which case the upload is a legitimate retry.
+ */
+function isDuplicateOf(latest: Document, contentHash: string): boolean {
+  return latest.contentHash === contentHash && latest.status !== DocumentStatus.ERROR;
 }
 
 function sha256(buffer: Buffer): string {

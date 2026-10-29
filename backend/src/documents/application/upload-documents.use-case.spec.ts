@@ -229,6 +229,71 @@ describe('UploadDocumentsUseCase', () => {
       expect(repository.get(FIXTURE_IDS[1])?.isLatest).toBe(true);
     });
 
+    it('reports a duplicate when the latest version is INDEXED with the same bytes', async () => {
+      await upload('v1.txt', 'same bytes', metadata('Manual'));
+      const indexed = repository.get(FIXTURE_IDS[0])!;
+      indexed.markIndexed('same bytes');
+      await repository.update(indexed);
+
+      const response = await upload('retry.txt', 'same bytes', metadata('Manual'));
+
+      expect(response.items[0]).toMatchObject({
+        status: DocumentStatus.INDEXED,
+        duplicateOf: { id: FIXTURE_IDS[0], version: '1.0.0' },
+      });
+      expect(repository.count()).toBe(1);
+    });
+
+    it('creates a new version when the latest one is ERROR, even with the same bytes (retry after failure)', async () => {
+      await upload('v1.txt', 'same bytes', metadata('Manual'));
+      const failed = repository.get(FIXTURE_IDS[0])!;
+      failed.markFailed('extraction failed');
+      await repository.update(failed);
+      storage.files.clear();
+      queue.enqueued.length = 0;
+
+      const response = await upload('retry.txt', 'same bytes', metadata('Manual'));
+
+      expect(response.items).toEqual([
+        { id: FIXTURE_IDS[1], status: DocumentStatus.PROCESSING, fileName: 'retry.txt', version: '1.0.1' },
+      ]);
+      expect(repository.get(FIXTURE_IDS[1])).toMatchObject({ isLatest: true, contentHash: sha256('same bytes') });
+      expect(repository.get(FIXTURE_IDS[0])).toMatchObject({ status: DocumentStatus.ERROR, isLatest: false });
+      expect(storage.files.get(`${FIXTURE_IDS[1]}.txt`)?.toString()).toBe('same bytes');
+      expect(queue.enqueued).toEqual([FIXTURE_IDS[1]]);
+    });
+
+    it('treats the bytes of an older superseded version as a rollback: new version, not a duplicate', async () => {
+      await upload('v1.txt', 'original', metadata('Manual', { version: '1.0.0' }));
+      await upload('v2.txt', 'changed', metadata('Manual', { version: '1.1.0' }));
+
+      const response = await upload('rollback.txt', 'original', metadata('Manual', { version: '1.0.0' }));
+
+      expect(response.items).toEqual([
+        { id: FIXTURE_IDS[2], status: DocumentStatus.PROCESSING, fileName: 'rollback.txt', version: '1.1.1' },
+      ]);
+      expect(repository.count()).toBe(3);
+      expect(repository.get(FIXTURE_IDS[2])).toMatchObject({ isLatest: true, contentHash: sha256('original') });
+      expect(repository.get(FIXTURE_IDS[1])?.isLatest).toBe(false);
+      expect(repository.get(FIXTURE_IDS[0])?.isLatest).toBe(false);
+    });
+
+    it('marks the new version as ERROR and rethrows when the previous version cannot be superseded', async () => {
+      await upload('v1.txt', 'one', metadata('Manual'));
+      const failure = new Error('database unavailable');
+      repository.failNextUpdateWith(failure);
+
+      await expect(upload('v2.txt', 'two', metadata('Manual'))).rejects.toBe(failure);
+
+      expect(repository.get(FIXTURE_IDS[1])).toMatchObject({
+        status: DocumentStatus.ERROR,
+        errorMessage: 'Failed to supersede previous version',
+        isLatest: true,
+      });
+      expect(repository.get(FIXTURE_IDS[0])?.isLatest).toBe(true);
+      expect(queue.enqueued).toEqual([FIXTURE_IDS[0]]);
+    });
+
     it('marks the new version as ERROR but keeps the previous one superseded when enqueue fails', async () => {
       await upload('v1.txt', 'one', metadata('Manual'));
       const failure = new Error('queue unavailable');

@@ -214,4 +214,47 @@ describe('Document versioning (integration)', () => {
       id: ids[0],
     });
   });
+
+  it('upload through the real repository: same bytes over an ERROR latest version create a new version', async () => {
+    const repository = new DrizzleDocumentRepository(db);
+    const queue = new RecordingJobQueue();
+    const ids = [randomUUID(), randomUUID()];
+    const useCase = new UploadDocumentsUseCase({
+      repository,
+      storage: new InMemoryFileStorage(),
+      queue,
+      idGenerator: new FixedIdGenerator(ids),
+    });
+    const buffer = Buffer.from('contenido que fallo al indexar', 'utf8');
+    const upload = (fileName: string) =>
+      useCase.execute({
+        files: [{ fileName, mimeType: 'text/plain', sizeBytes: buffer.byteLength, buffer }],
+        metadata: [{ title: 'Informe de Grúa', author: 'Ana Torres', category: 'reports', tags: [], version: '1.0.0' }],
+      });
+
+    await upload('v1.txt');
+    const failed = await repository.findById(ids[0]);
+    failed!.markFailed('extraction failed');
+    await repository.update(failed!);
+
+    const retry = await upload('retry.txt');
+    expect(retry.items[0]).toEqual({
+      id: ids[1],
+      status: DocumentStatus.PROCESSING,
+      fileName: 'retry.txt',
+      version: '1.0.1',
+    });
+
+    const rows = await pool.query<{ id: string; status: string; is_latest: boolean; content_hash: string }>(
+      'SELECT id, status, is_latest, content_hash FROM documents ORDER BY created_at, id',
+    );
+    expect(rows.rows).toHaveLength(2);
+    expect(rows.rows.find((r) => r.id === ids[0])).toMatchObject({ status: DocumentStatus.ERROR, is_latest: false });
+    expect(rows.rows.find((r) => r.id === ids[1])).toMatchObject({
+      status: DocumentStatus.PROCESSING,
+      is_latest: true,
+      content_hash: sha256('contenido que fallo al indexar'),
+    });
+    expect(queue.enqueued).toEqual([ids[0], ids[1]]);
+  });
 });
