@@ -240,6 +240,34 @@ presentacionales en `components/`). El highlight se renderiza sin `dangerouslySe
 `frontend/src/lib/highlight.ts` parte el texto en segmentos interpretando únicamente los
 tokens literales `<mark>`/`</mark>`.
 
+**Sistema visual.** El rediseño de la fase 8 partió de un lienzo aprobado por el candidato en
+Claude Design (<https://claude.ai/artifact/TZ1ZE9HYMMuvuQ14y4uQAo>) y se implementó así:
+
+- **Tokens semánticos** en el bloque `@theme` de Tailwind v4 (`frontend/src/index.css`):
+  `--color-ground`, `--color-surface`, `--color-raised`, `--color-line`, `--color-ink`,
+  `--color-ink-soft`, `--color-ink-label`, `--color-accent`, `--color-ok/busy/bad`,
+  `--color-mark`, `--color-code`, `--font-sans` y `--font-reading`. La paleta de serie se
+  desactivó con `--color-*: initial`, de modo que una clase sobrante no renderiza nada y se
+  detecta con una búsqueda en el código. Se usó `@theme` y no `@theme inline` para que las
+  utilidades compilen a `var(--color-x)` y un cambio en tiempo de ejecución las afecte.
+- **Modo noche**: las mismas variables sobrescritas bajo `:root[data-theme="dark"]`; la
+  preferencia se guarda en `localStorage` (`techdocs.theme`) con `prefers-color-scheme` como
+  valor por defecto, un script en línea en `index.html` la aplica antes del primer pintado y el
+  conmutador «Modo noche / Modo día» vive en el pie del rail (`frontend/src/app/theme.ts`).
+  Los componentes nunca usan `dark:`.
+- **Fuentes autoalojadas** vía `@fontsource/atkinson-hyperlegible` (interfaz, 400/700) y
+  `@fontsource-variable/literata` (cuerpo del documento a 17 px / 1.7, ancho de lectura 68ch),
+  importadas en `main.tsx` para que la imagen Docker las resuelva desde el lockfile.
+- **Shell**: rail izquierdo de 232 px a partir de 768 px; por debajo, barra superior compacta
+  de 56 px. Los resultados son una lista separada por líneas finas (sin tarjetas ni sombras);
+  el estado se muestra como punto más palabra en minúscula inicial (`StatusDot`: Procesando /
+  Indexado / Error) y la latencia como texto atenuado (`SearchLatency`).
+- **Índice «En este documento»**: construido a partir de los encabezados `##` del Markdown
+  (`frontend/src/lib/markdownOutline.ts`), con los ids inyectados vía `components.h2` de
+  react-markdown y publicado al rail a través de `DocumentOutlineContext`; visible desde
+  1024 px. En pantallas estrechas el artículo (título) se lee antes del panel de metadatos.
+- **Contraste**: todo color de texto sobre su fondo cumple al menos 4.5:1 en ambos modos.
+
 ### 2.7 Arquitectura hexagonal por capacidad de negocio
 
 El backend se organiza por capacidad (`documents`, `search`, `notifications`), y dentro de cada
@@ -530,7 +558,7 @@ stateDiagram-v2
 | Unitarias (backend) | Agregado `Document` y transiciones, resolución de formato, `UploadDocuments`, `IndexDocument`, `FailDocument`, `GetDocument`, `SearchQuery`, `SearchDocuments`, `EventReplayBuffer`, worker (último intento), `indexing-failure` (mensajes públicos), `error-details`, extractor, `env.schema`, `HttpExceptionFilter`, `HealthController`, `EventsController` | Jest + ts-jest; fakes de puertos en memoria (`__fakes__/`); sin base de datos | Backend: 127 pruebas unitarias/e2e en 19 suites |
 | E2E de controlador (backend) | `DocumentsController` (multipart, validación, 202, 404) y `SearchController` (DTO, filtros, headers) | `@nestjs/testing` + supertest con casos de uso reales sobre fakes | Incluidas en las 19 suites (`*.e2e-spec.ts`) |
 | Integración (backend) | Ranking título > contenido, mapeo de columnas, acentos y stemming español, frases entre comillas, highlight con `<mark>` y ≤ 2 fragmentos, paginación estable, paginación determinista con 40 filas de rank y fecha idénticos (desempate por `id`), solo `INDEXED`, stopwords, uso del GIN vía `EXPLAIN`, latencia p95 < 1 s sobre 20 consultas | Testcontainers `postgres:16-alpine` o `TEST_DATABASE_URL`; migraciones reales; 300 docs + fixtures | 11 pruebas en `backend/test/search.integration-spec.ts` |
-| Frontend | Validación de carga, `useSearch` (debounce y URL), `SearchPage`, `SearchResultCard`, `useDocumentEvents` (patch de caché, toasts, reconexión y resincronización), `useUploadDocuments` (carrera evento-antes-del-202, alineación de `FormData`, polling), `UploadPage` (límite de 20 archivos), `DocumentPage`, `highlight`, `status` | Vitest + Testing Library + MSW; `EventSource` simulado (`frontend/src/test/mockEventSource.ts`) | 44 pruebas en 10 archivos |
+| Frontend | Validación de carga, `useSearch` (debounce y URL), `SearchPage`, `SearchResultCard`, `useDocumentEvents` (patch de caché, toasts, reconexión y resincronización), `useUploadDocuments` (carrera evento-antes-del-202, alineación de `FormData`, polling), `UploadPage` (límite de 20 archivos), `DocumentPage` (ids de `h2`, sin control de descarga), `highlight`, `status`, `theme` (valor guardado, `matchMedia`, conmutador), `AppShell` (rail, modo noche, índice), `markdownOutline`, `TableOfContents`, `StatusDot`, `Button`, `FileDropzone`, `SearchBar`, `TrackedUploadsList` | Vitest + Testing Library + MSW; `EventSource` simulado (`frontend/src/test/mockEventSource.ts`) | 92 pruebas en 19 archivos (`Test Files  19 passed (19)` / `Tests  92 passed (92)`) |
 
 Comandos: `pnpm test` (unitarias de todos los paquetes), `pnpm --filter backend test:integration`
 (requiere Docker o `TEST_DATABASE_URL`), `pnpm lint` (`tsc --noEmit`).
