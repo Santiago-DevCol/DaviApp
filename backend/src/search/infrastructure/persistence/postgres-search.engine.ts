@@ -46,6 +46,8 @@ type SearchRow = {
  *      the familiar syntax ("quoted phrases", -excluded, OR) and never throws
  *      on unbalanced input, unlike `to_tsquery`.
  *   2. `hits` is the only part that touches every match: index lookup, rank,
+ *      latest-version filter (`is_latest`: superseded versions stay readable
+ *      by id but never appear in results),
  *      sort, window count for the total and LIMIT/OFFSET. It returns ids only.
  *      When the text contains nothing but stopwords the tsquery is empty
  *      (`numnode = 0`); the filter on `q` is evaluated before the join, so the
@@ -81,6 +83,7 @@ export class PostgresSearchEngine implements SearchEngine {
         FROM documents d, q
         WHERE numnode(q.query) > 0
           AND d.status = ${DocumentStatus.INDEXED}
+          AND d.is_latest
           AND d.search_vector @@ q.query
         ORDER BY rank DESC, d.created_at DESC, d.id DESC
         LIMIT ${query.pageSize} OFFSET ${query.offset}
@@ -124,6 +127,7 @@ export class PostgresSearchEngine implements SearchEngine {
       FROM documents d, q
       WHERE numnode(q.query) > 0
         AND d.status = ${DocumentStatus.INDEXED}
+        AND d.is_latest
         AND d.search_vector @@ q.query
     `);
     return Number(result.rows[0]?.total ?? 0);
