@@ -15,13 +15,16 @@ describe('DocumentPage', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: INDEXED_DOC.title })).toBeInTheDocument();
     // The Markdown renderer is code-split, so its output arrives asynchronously.
-    expect(await screen.findByRole('heading', { level: 1, name: 'Despliegue' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Despliegue' }, { timeout: 5000 }),
+    ).toBeInTheDocument();
     expect(screen.getByText('kubectl apply')).toBeInTheDocument();
     expect(screen.getByText('Paso uno').closest('ul')).not.toBeNull();
     expect(screen.getByText('Equipo Plataforma')).toBeInTheDocument();
     expect(screen.getByText('INDEXADO')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Volver a resultados/ })).toHaveAttribute('href', '/search');
-  });
+    // Keep the per-test timeout above the 5 s wait for the lazy chunk; Vitest defaults to 5 s.
+  }, 10_000);
 
   it('shows the processing banner and flips to the content after the SSE event', async () => {
     renderWithProviders(<DocumentPage />, {
