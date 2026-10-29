@@ -31,7 +31,7 @@ export function Highlight({ text }: { text: string }) {
 export function SearchResultCard({ item, to, state }: SearchResultCardProps) {
   return (
     <article className="border-t border-line py-5">
-      <h3 className="text-lg font-bold leading-snug">
+      <h3 className="text-lg font-bold leading-snug [overflow-wrap:anywhere]">
         <Link to={to} state={state} className="text-ink hover:text-accent focus-ring">
           {item.title}
         </Link>

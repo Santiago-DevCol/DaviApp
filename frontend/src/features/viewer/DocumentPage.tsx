@@ -85,7 +85,7 @@ export function DocumentPage() {
               <p className="text-[13px] text-ink-label">
                 {data.category} · v{data.version}
               </p>
-              <h1 className="font-reading text-[38px] font-semibold leading-tight tracking-tight">{data.title}</h1>
+              <h1 className="font-reading text-[38px] font-semibold leading-tight tracking-tight [overflow-wrap:anywhere]">{data.title}</h1>
               <p className="text-ink-soft">
                 {data.author} · {formatDateTime(data.updatedAt)}
               </p>
