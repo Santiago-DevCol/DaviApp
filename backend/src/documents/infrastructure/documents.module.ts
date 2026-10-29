@@ -124,7 +124,12 @@ const ORPHAN_FILE_MINUTES = 60;
       provide: SweepOrphanFilesUseCase,
       inject: [DOCUMENT_REPOSITORY, FILE_STORAGE],
       useFactory: (repository: DocumentRepository, storage: FileStorage) =>
-        new SweepOrphanFilesUseCase({ repository, storage, orphanAfterMinutes: ORPHAN_FILE_MINUTES }),
+        new SweepOrphanFilesUseCase({
+          repository,
+          storage,
+          orphanAfterMinutes: ORPHAN_FILE_MINUTES,
+          logger: new Logger(SweepOrphanFilesUseCase.name),
+        }),
     },
     {
       provide: GetDocumentUseCase,

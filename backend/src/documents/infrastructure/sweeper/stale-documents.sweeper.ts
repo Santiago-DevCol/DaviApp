@@ -48,9 +48,11 @@ export class StaleDocumentsSweeper implements OnModuleInit, OnModuleDestroy {
   async sweep(now = new Date()): Promise<void> {
     try {
       const settled = await this.sweepStaleDocuments.execute(now);
-      const deleted = await this.sweepOrphanFiles.execute(now);
-      if (settled > 0 || deleted > 0) {
-        this.logger.warn(`Sweep settled ${settled} stale document(s) and deleted ${deleted} orphan file(s)`);
+      const { deleted, failed } = await this.sweepOrphanFiles.execute(now);
+      if (settled > 0 || deleted > 0 || failed > 0) {
+        this.logger.warn(
+          `Sweep settled ${settled} stale document(s), deleted ${deleted} orphan file(s), ${failed} delete(s) failed`,
+        );
       } else {
         this.logger.debug('Sweep found nothing to clean');
       }

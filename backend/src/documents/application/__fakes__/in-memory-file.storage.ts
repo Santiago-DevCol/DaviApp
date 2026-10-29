@@ -5,6 +5,7 @@ export class InMemoryFileStorage implements FileStorage {
   readonly modifiedAt = new Map<string, Date>();
   readonly deleted: string[] = [];
   private deleteFailure: Error | null = null;
+  private readonly deleteFailuresByKey = new Map<string, Error>();
 
   async save(key: string, buffer: Buffer): Promise<void> {
     this.files.set(key, Buffer.from(buffer));
@@ -20,6 +21,10 @@ export class InMemoryFileStorage implements FileStorage {
   }
 
   async delete(key: string): Promise<void> {
+    const keyFailure = this.deleteFailuresByKey.get(key);
+    if (keyFailure) {
+      throw keyFailure;
+    }
     if (this.deleteFailure) {
       throw this.deleteFailure;
     }
@@ -38,6 +43,10 @@ export class InMemoryFileStorage implements FileStorage {
   seed(key: string, buffer: Buffer, modifiedAt: Date): void {
     this.files.set(key, Buffer.from(buffer));
     this.modifiedAt.set(key, modifiedAt);
+  }
+
+  failDeleteOfKeyWith(key: string, error: Error): void {
+    this.deleteFailuresByKey.set(key, error);
   }
 
   failDeleteWith(error: Error): void {
