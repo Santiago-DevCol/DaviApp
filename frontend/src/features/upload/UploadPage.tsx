@@ -145,11 +145,11 @@ export function UploadPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex max-w-[760px] flex-col gap-8">
       <section className="flex flex-col gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Cargar documentos</h1>
-          <p className="text-sm text-slate-500">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-[28px] font-bold leading-tight tracking-tight">Cargar documentos</h1>
+          <p className="text-ink-soft">
             Formatos {ALLOWED_EXTENSIONS.map((e) => `.${e}`).join(', ')} de hasta{' '}
             {formatBytes(MAX_FILE_SIZE_BYTES)} cada uno; máximo {MAX_FILES_PER_UPLOAD} archivos por envío.
           </p>
@@ -163,7 +163,7 @@ export function UploadPage() {
         />
 
         {omitted > 0 && (
-          <p role="status" className="text-xs text-amber-700">
+          <p role="status" className="text-[13px] text-busy">
             {omitted === 1
               ? `Se omitió 1 archivo: el máximo por lote es ${MAX_FILES_PER_UPLOAD}.`
               : `Se omitieron ${omitted} archivos: el máximo por lote es ${MAX_FILES_PER_UPLOAD}.`}
@@ -176,7 +176,7 @@ export function UploadPage() {
               event.preventDefault();
               submit();
             }}
-            className="flex flex-col gap-3"
+            className="flex flex-col gap-4"
             noValidate
           >
             {pending.map((item, index) => (
@@ -225,7 +225,7 @@ export function UploadPage() {
                 Descartar todo
               </Button>
               {invalidFiles > 0 && (
-                <p className="text-xs text-red-700">
+                <p className="text-[13px] text-bad">
                   {invalidFiles === 1
                     ? '1 archivo no válido no se enviará.'
                     : `${invalidFiles} archivos no válidos no se enviarán.`}

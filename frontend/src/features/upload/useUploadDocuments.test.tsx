@@ -44,6 +44,20 @@ function setup() {
   return { client, ...renderHook(() => useUploadHarness(), { wrapper }) };
 }
 
+/**
+ * Waits for the 202 to be processed by both hooks. `track` runs inside the
+ * mutation's `onSuccess`, but its `setEntries` is committed by a later render
+ * than the one that flips `isSuccess` (the mutation store notifies React
+ * synchronously, the state update waits for the scheduler), so reading the
+ * tracked list right after `isSuccess` can observe an empty intermediate commit.
+ */
+async function waitForAccepted(result: { current: ReturnType<typeof useUploadHarness> }, count: number) {
+  await waitFor(() => {
+    expect(result.current.upload.isSuccess).toBe(true);
+    expect(result.current.tracked.entries).toHaveLength(count);
+  });
+}
+
 describe('useUploadDocuments + useTrackedUploads', () => {
   it('converges to INDEXED when the status event lands before the 202 (no SSE event at all)', async () => {
     // The worker already finished file 1 before the batch answered 202: the
@@ -53,9 +67,8 @@ describe('useUploadDocuments + useTrackedUploads', () => {
 
     act(() => result.current.upload.mutate({ files: [textFile('notas.txt')], metadata: [METADATA] }));
 
-    await waitFor(() => expect(result.current.upload.isSuccess).toBe(true));
-    // The optimistic row is visible immediately with the seeded status.
-    expect(result.current.tracked.entries).toHaveLength(1);
+    await waitForAccepted(result, 1);
+    // The optimistic row is tracked with the seeded document before any GET answers.
     expect(result.current.tracked.entries[0]?.id).toBe(FIRST_ACCEPTED_ID);
     expect(client.getQueryData<DocumentDetail>(queryKeys.document(FIRST_ACCEPTED_ID))).toBeDefined();
 
@@ -111,7 +124,7 @@ describe('useUploadDocuments + useTrackedUploads', () => {
         metadata: [METADATA, second],
       }),
     );
-    await waitFor(() => expect(result.current.upload.isSuccess).toBe(true));
+    await waitForAccepted(result, 2);
 
     const form = received as FormData | null;
     expect(form).not.toBeNull();
@@ -149,7 +162,7 @@ describe('useUploadDocuments + useTrackedUploads', () => {
         metadata: [METADATA, { ...METADATA, title: 'Segundo' }],
       }),
     );
-    await waitFor(() => expect(result.current.upload.isSuccess).toBe(true));
+    await waitForAccepted(result, 2);
 
     const [bumped, duplicate] = result.current.tracked.entries;
     expect(bumped).toMatchObject({ id: 'bumped', sentVersion: '1.0.0', version: '1.0.1' });

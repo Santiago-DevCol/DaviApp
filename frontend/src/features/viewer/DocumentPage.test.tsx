@@ -6,7 +6,37 @@ import { INDEXED_DOC, OLD_VERSION_DOC, PROCESSING_DOC, setDocument } from '@/tes
 import { renderWithProviders } from '@/test/render';
 import { DocumentPage } from './DocumentPage';
 
+const OUTLINED_MARKDOWN = '# Despliegue\n\n## Requisitos\n\nTexto\n\n## Pasos\n\n- Paso uno';
+
 describe('DocumentPage', () => {
+  it('gives Markdown section headings an anchor id for the outline', async () => {
+    setDocument({ ...INDEXED_DOC, content: OUTLINED_MARKDOWN });
+    renderWithProviders(<DocumentPage />, {
+      route: `/documents/${INDEXED_DOC.id}`,
+      path: '/documents/:id',
+    });
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Requisitos' }, { timeout: 5000 }),
+    ).toHaveAttribute('id', 'requisitos');
+    expect(screen.getByRole('heading', { level: 2, name: 'Pasos' })).toHaveAttribute('id', 'pasos');
+  }, 10_000);
+
+  it('shows the metadata values in the aside and offers no download control', async () => {
+    renderWithProviders(<DocumentPage />, {
+      route: `/documents/${INDEXED_DOC.id}`,
+      path: '/documents/:id',
+    });
+
+    const aside = await screen.findByRole('complementary', { name: 'Metadatos' });
+    expect(within(aside).getByText(INDEXED_DOC.category)).toBeInTheDocument();
+    expect(within(aside).getByText(INDEXED_DOC.version)).toBeInTheDocument();
+    expect(within(aside).getByText(/k8s-guide\.md/)).toBeInTheDocument();
+    expect(within(aside).getByText('kubernetes')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Descargar/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Descargar/ })).toBeNull();
+  });
+
   it('renders an indexed Markdown document with its metadata', async () => {
     renderWithProviders(<DocumentPage />, {
       route: `/documents/${INDEXED_DOC.id}`,
@@ -21,7 +51,7 @@ describe('DocumentPage', () => {
     expect(screen.getByText('kubectl apply')).toBeInTheDocument();
     expect(screen.getByText('Paso uno').closest('ul')).not.toBeNull();
     expect(screen.getByText('Equipo Plataforma')).toBeInTheDocument();
-    expect(screen.getAllByText('INDEXADO').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Indexado').length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: /Volver a resultados/ })).toHaveAttribute('href', '/search');
     // Keep the per-test timeout above the 5 s wait for the lazy chunk; Vitest defaults to 5 s.
   }, 10_000);
@@ -34,7 +64,7 @@ describe('DocumentPage', () => {
     });
 
     expect(await screen.findByText('El documento se está procesando')).toBeInTheDocument();
-    expect(screen.getAllByText('PROCESANDO').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Procesando').length).toBeGreaterThan(0);
 
     // The backend finishes indexing: the detail now has content, and the event arrives.
     setDocument({ ...PROCESSING_DOC, status: DocumentStatus.INDEXED, content: 'Texto indexado del documento.' });
@@ -48,7 +78,7 @@ describe('DocumentPage', () => {
 
     expect(await screen.findByText('Texto indexado del documento.')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText('El documento se está procesando')).toBeNull());
-    expect(screen.getAllByText('INDEXADO').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Indexado').length).toBeGreaterThan(0);
     // The toast viewport is rendered by the shell; here only the cache-driven UI is asserted.
   });
 

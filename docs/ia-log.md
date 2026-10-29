@@ -152,6 +152,85 @@ Format per entry: stage, tool, what was asked, what came back, human validation 
   concurrent uploads of the same identity are not serialized (advisory lock in the roadmap);
   orphan file if the process dies between `storage.save` and the insert.
 
+## 2026-10-28 — Phase 8: visual redesign (Claude Design + Claude Code writers)
+
+- **Tool**: Claude Design (the design-canvas artifact type inside the Claude desktop app, Code
+  tab, Claude Fable 5.1) for the visual proposal; Claude Code (Claude Fable 5.1) in plan mode
+  and then as orchestrator for the implementation.
+- **Prompt (summary)**: redesign the frontend as a calm reading tool: left-rail navigation,
+  warm neutral ground, a single accent, hairline-separated lists instead of shadow cards,
+  self-hosted typography (Atkinson Hyperlegible for UI, Literata for the document body), an
+  optional night mode, every text color at 4.5:1 or better. Plan mode ran two exploration
+  sub-agents and one planning sub-agent; the implementation went to four writer sub-agents in
+  sequence (U1-U3, U4-U5, U6-U7, U8), each unit TDD (failing tests first), one conventional
+  commit per unit.
+- **What came back**: the canvas <https://claude.ai/artifact/TZ1ZE9HYMMuvuQ14y4uQAo> with five
+  artboards (Buscar, Lector, Cargar, Lector modo noche, Fundamentos: day/night palette with
+  contrast ratios, typography, components, rules), and eight commits on `feat/calm-ui`:
+  `b914c36` design tokens, self-hosted fonts and night mode; `2cf2116` atoms and molecules on
+  the token palette; `b8557dd` document status as a dot and sentence-case word; `01e2d0b`
+  left-rail shell with responsive top bar, theme toggle and outline slot; `2787185` search page
+  as a hairline list; `3cbe48e` upload page with metadata cards and tracked-uploads grid;
+  `c2f1852` reader layout with Literata body, metadata aside and outline; `0724f19` document
+  title read before its metadata on narrow screens. "Descargar original" from the canvas was
+  not implemented (no endpoint).
+- **Human validation**: the candidate reviewed and approved the canvas before any code and
+  attached two requirements to the approval: responsive as a first-class concern, and the tools
+  recorded in the repository docs. The orchestrator session verified each writer hand-back
+  against the diff, re-ran the suite (final line `Test Files  19 passed (19)` /
+  `Tests  92 passed (92)`, up from 44 in 10 files), `tsc --noEmit`, `vite build` and
+  `docker compose build frontend` (fonts resolve from the lockfile), swept the sources for
+  stock-palette classes (nothing left), and checked the app in the Claude desktop built-in
+  browser against the Vite dev server at 375 / 768 / 1280 px in day and night mode: no
+  horizontal scroll at any width, 56 px top bar with visible nav labels at 375, 44 px targets,
+  rail with hidden table of contents at 768, table of contents and metadata aside beside the
+  68ch article at 1280, night mode persisted across reload.
+- **Corrections during implementation**:
+  - `@theme inline` would have baked hex values into the utilities and broken night mode; plain
+    `@theme` was required so utilities compile to `var(--color-x)`.
+  - `@apply` of `focus-visible:` inside `@utility` compiled to a ring that never renders;
+    replaced by plain CSS.
+  - jsdom lacks `window.matchMedia`, so the theme resolver guards it.
+  - react-router data routers build a `Request` with jsdom's `AbortSignal`, which undici
+    rejects under Vitest; the test setup strips `signal` (the same workaround already used for
+    `fetch`).
+  - Tailwind's scanner reads test files, so a test fixture string `'sepia'` emitted a dead
+    utility and was renamed.
+  - One writer reported honestly that two of its new test files were characterization tests
+    (green against the old components) rather than red-first.
+- **Independent review (4R: risk, resilience, readability, reliability)**: four fresh-context
+  review sub-agents swept the redesign diff; no BLOCKER or CRITICAL finding. Warnings fixed in a
+  follow-up round by one writer (`f147b42`, `26ed4de`; suite now `Test Files  19 passed (19)` /
+  `Tests  98 passed (98)`): the outline links were plain fragment anchors, so a jump pushed a
+  history entry with null state and "Volver a resultados" lost the search query (reproduced in
+  the browser; the links now navigate through the router with `replace` and keep the state);
+  the heading parser stripped a trailing `#` that was part of the text (`## C#`), treated any
+  fence line as a toggle (a shorter inner fence or a `~~~` line closed a backtick block) and
+  could emit a duplicate id (`Pasos`, `Pasos 2`, `Pasos`); `border-dashed` doubled as a color
+  utility because the token was named `--color-dashed` (renamed `--color-dropzone`). Left as
+  info, not fixed: inline SVG icon props duplicated across three files, the two-way coupling
+  between `app/layout` and `features/viewer` for the outline, a comment claiming a single
+  `extractHeadings` pass, and the first-paint theme script being only string-checked by tests.
+
+## 2026-10-29 — Merge: visual redesign into main after Iteration 2
+
+- **What happened**: `feat/calm-ui` (Phase 8) was merged with `origin/main` after the content
+  versioning iteration had landed there. Eight files conflicted (three docs, the tracked-uploads
+  list and its test, the document page and its test, the metadata panel).
+- **Resolution rule**: main's behaviour, data flow, props, strings and tests win; the token-based
+  visual system wins everywhere. The tracked-uploads hairline grid gained the duplicate row
+  (`StatusDot` neutral "Duplicado" plus "Ya existía como versión x") and the assigned-version
+  note; the boxless metadata aside gained the "Versiones" list with a `StatusDot` per version;
+  `OutdatedVersionBanner` (new on main) was ported from the amber box to `border-line` /
+  `bg-surface` with the title in `text-busy`. Main's tests asserting uppercase status labels
+  ("INDEXADO", "PROCESANDO") were switched to the sentence-case words; the two
+  `TrackedUploadsList` suites were merged into one file. No stock-palette class is left under
+  `frontend/src`.
+- **Verification**: `tsc --noEmit` clean, `vite build` OK, backend `Test Suites: 21 passed` /
+  `Tests: 163 passed`; frontend `Test Files  20 passed (20)` / `Tests  108 passed (108)`.
+  Observed once: when the frontend and backend suites run concurrently on the same machine,
+  the `DocumentPage` tests that wait up to 5 s for the lazy Markdown chunk can time out; alone
+  the suite is green.
 ## 2026-10-29 — Iteration 3: atomicity, stale sweeper and suggested metadata (three writers in parallel, one docs writer)
 
 - **Trigger**: versioning merged and green; the candidate picked up the roadmap.
@@ -198,3 +277,28 @@ Format per entry: stage, tool, what was asked, what came back, human validation 
 - **Pending**: the candidate's manual walkthrough of this iteration (prefill demo with
   `sample-manual.md`, sweeper log line) is still open in `docs/ia.md` section 5; the concurrency
   demo is not required because the integration suite covers it.
+
+## 2026-10-29 — Merge (2): visual redesign rebased on Iteration 3
+
+- **What happened**: `feat/calm-ui` was merged with `origin/main` again after Iteration 3
+  (atomic uploads, stale sweeper, suggested metadata) had landed there. Four files conflicted:
+  the three docs and `MetadataForm`.
+- **Resolution rule**: main's behaviour, props, strings, aria attributes and tests win; the
+  token-based visual system wins. The metadata card kept its two-column grid (title and tags
+  spanning both columns, 44 px controls, "Quitar" quiet button) and gained main's suggestion
+  hints under each field, the page count next to the size, and the "Analizando archivos…" /
+  "No se pudieron sugerir metadatos" status notes, restyled from the stock palette to
+  `text-ink-label` / `text-busy`. `UploadPage`, `suggestions.ts`, `documents.api.ts`, the MSW
+  handlers and the upload tests merged without conflict and carry no stock-palette class.
+- **Verification**: `pnpm --filter frontend lint` (`tsc --noEmit`) clean, `vite build` OK,
+  backend `Test Suites: 28 passed, 28 total` / `Tests: 206 passed, 206 total` (unit/e2e only);
+  frontend `Test Files  20 passed (20)` / `Tests  115 passed (115)`.
+- **Flaky test fixed after the merge**: `useUploadDocuments.test.tsx` failed once in four full
+  runs (`expected [] to have a length of 1`) while passing alone. A render trace of the harness
+  showed the cause in 61 of 61 executions: `track` calls `setEntries` inside the mutation's
+  `onSuccess`, but React Query then notifies the `useMutation` store synchronously, so the
+  commit that flips `isSuccess` lands first and the tracked row is committed by the next
+  scheduler task. The tests read the tracked list right after `waitFor(isSuccess)`, which could
+  poll inside that gap under load. The three affected tests now await `isSuccess` and the
+  expected number of tracked entries in the same `waitFor`; the assertions are unchanged. The
+  hooks were not touched: the gap is one commit long and converges on its own.

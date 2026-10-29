@@ -82,7 +82,7 @@ sequenceDiagram
   UP->>Q: boss.send("index-document", {documentId})
   UP-->>DC: { items: [{ id, status: PROCESSING, fileName }] }
   DC-->>UI: 202 Accepted
-  UI->>UI: guarda id en sessionStorage, muestra PROCESANDO
+  UI->>UI: guarda id en sessionStorage, muestra «Procesando»
 
   Q->>W: boss.work (batchSize 1, includeMetadata)
   W->>IX: execute(documentId)
@@ -133,8 +133,9 @@ Se interpreta como un SLO de latencia: **p95 ≤ 1 s** medido en el backend, exp
 `backend/src/search/application/search-documents.use-case.ts`). No se introduce ningún retraso
 artificial para "alcanzar" los 400 ms: un sistema que responde en 20 ms cumple el objetivo con
 margen, y penalizarlo deliberadamente sería contrario al propósito del requisito. La UI muestra
-el `tookMs` en un badge (`frontend/src/features/search/components/LatencyBadge.tsx`) para que el
-cumplimiento sea visible en la demo.
+el `tookMs` como texto discreto junto al total
+(`frontend/src/features/search/components/SearchLatency.tsx`) para que el cumplimiento sea
+visible en la demo.
 
 ### 2.2 Base de datos y motor de búsqueda: PostgreSQL 16 FTS
 
@@ -239,6 +240,34 @@ presentacionales en `components/`). El highlight se renderiza sin `dangerouslySe
 `frontend/src/lib/highlight.ts` parte el texto en segmentos interpretando únicamente los
 tokens literales `<mark>`/`</mark>`.
 
+**Sistema visual.** El rediseño de la fase 8 partió de un lienzo aprobado por el candidato en
+Claude Design (<https://claude.ai/artifact/TZ1ZE9HYMMuvuQ14y4uQAo>) y se implementó así:
+
+- **Tokens semánticos** en el bloque `@theme` de Tailwind v4 (`frontend/src/index.css`):
+  `--color-ground`, `--color-surface`, `--color-raised`, `--color-line`, `--color-ink`,
+  `--color-ink-soft`, `--color-ink-label`, `--color-accent`, `--color-ok/busy/bad`,
+  `--color-mark`, `--color-code`, `--font-sans` y `--font-reading`. La paleta de serie se
+  desactivó con `--color-*: initial`, de modo que una clase sobrante no renderiza nada y se
+  detecta con una búsqueda en el código. Se usó `@theme` y no `@theme inline` para que las
+  utilidades compilen a `var(--color-x)` y un cambio en tiempo de ejecución las afecte.
+- **Modo noche**: las mismas variables sobrescritas bajo `:root[data-theme="dark"]`; la
+  preferencia se guarda en `localStorage` (`techdocs.theme`) con `prefers-color-scheme` como
+  valor por defecto, un script en línea en `index.html` la aplica antes del primer pintado y el
+  conmutador «Modo noche / Modo día» vive en el pie del rail (`frontend/src/app/theme.ts`).
+  Los componentes nunca usan `dark:`.
+- **Fuentes autoalojadas** vía `@fontsource/atkinson-hyperlegible` (interfaz, 400/700) y
+  `@fontsource-variable/literata` (cuerpo del documento a 17 px / 1.7, ancho de lectura 68ch),
+  importadas en `main.tsx` para que la imagen Docker las resuelva desde el lockfile.
+- **Shell**: rail izquierdo de 232 px a partir de 768 px; por debajo, barra superior compacta
+  de 56 px. Los resultados son una lista separada por líneas finas (sin tarjetas ni sombras);
+  el estado se muestra como punto más palabra en minúscula inicial (`StatusDot`: Procesando /
+  Indexado / Error) y la latencia como texto atenuado (`SearchLatency`).
+- **Índice «En este documento»**: construido a partir de los encabezados `##` del Markdown
+  (`frontend/src/lib/markdownOutline.ts`), con los ids inyectados vía `components.h2` de
+  react-markdown y publicado al rail a través de `DocumentOutlineContext`; visible desde
+  1024 px. En pantallas estrechas el artículo (título) se lee antes del panel de metadatos.
+- **Contraste**: todo color de texto sobre su fondo cumple al menos 4.5:1 en ambos modos.
+
 ### 2.7 Arquitectura hexagonal por capacidad de negocio
 
 El backend se organiza por capacidad (`documents`, `search`, `notifications`), y dentro de cada
@@ -328,7 +357,7 @@ funcione tras `pnpm install`.
   reenvío de `Last-Event-ID` son nativos del navegador; el hook solo recrea el stream si el
   navegador lo marca `CLOSED` (por ejemplo, una respuesta no reintentable), tras 5 s.
 - Al recibir `document.status`: parchea de inmediato la entrada `DocumentDetail` en la caché de
-  TanStack Query (cambia el badge en todas las pantallas), invalida esa consulta (para traer
+  TanStack Query (cambia el estado en todas las pantallas), invalida esa consulta (para traer
   contenido y metadatos finales) e invalida las búsquedas (`queryKeys.searches`), y muestra un
   toast (éxito para `INDEXED`, error persistente para `ERROR`).
 - Expone el estado de conexión (`connecting | open | reconnecting | closed`) para la UI.
@@ -484,7 +513,7 @@ stateDiagram-v2
   almacenamiento en el primer intento también guardan un motivo público sanitizado
   (`indexing-failure.ts`) y registran el detalle interno a través del logger del caso de uso.
 - El job es idempotente: si el documento ya no está en `PROCESSING`, se retorna sin tocarlo.
-- La UI traduce los estados a `PROCESANDO / INDEXADO / ERROR` (`frontend/src/lib/status.ts`).
+- La UI traduce los estados a `Procesando / Indexado / Error` (`frontend/src/lib/status.ts`).
 
 ## 6b. Versionado por contenido
 
@@ -878,7 +907,7 @@ para que la demo del prellenado sea reproducible.
 | Unitarias (backend) | Agregado `Document` y transiciones (incluido `supersede`), `buildDocumentKey`, semver tolerante (`parseVersion`, `compareVersions`, `bumpPatch`), resolución de formato, `UploadDocuments` (duplicado, reintento tras `ERROR`, rollback, bump automático, versión mayor respetada, typo = otra identidad, unidad de trabajo falsa con commit/rollback y borrado del archivo), `IndexDocument`, `FailDocument` (`UPDATE` condicional: sin evento si no cambió nada), `SweepStaleDocuments` y `SweepOrphanFiles` (reloj fijo, umbrales), `GetDocument` (historial de versiones), inspección (`metadata-suggestion`: sanitización y fallback; `metadata-extractors` con fixtures reales: PDF con `info`, MD con y sin front matter, YAML inválido, TXT; `InspectFiles`), `SearchQuery`, `SearchDocuments`, `EventReplayBuffer`, worker (último intento), `indexing-failure` (mensajes públicos), `error-details`, extractor, `env.schema` (incluidas las dos variables del sweeper), `HttpExceptionFilter`, `HealthController`, `EventsController` | Jest + ts-jest; fakes de puertos en memoria (`__fakes__/`); sin base de datos | Backend: 206 pruebas unitarias/e2e en 28 suites |
 | E2E de controlador (backend) | `DocumentsController` (multipart, validación, 202, 404), `InspectionController` (`POST /documents/inspect`: 200 con sugerencias, 400 sin archivos o formato no soportado, 413) y `SearchController` (DTO, filtros, headers) | `@nestjs/testing` + supertest con casos de uso reales sobre fakes | Incluidas en las 28 suites (`*.e2e-spec.ts`) |
 | Integración (backend) | Búsqueda (`search.integration-spec.ts`, 11): ranking título > contenido, mapeo de columnas, acentos y stemming español, frases entre comillas, highlight con `<mark>` y ≤ 2 fragmentos, paginación estable, paginación determinista con 40 filas de rank y fecha idénticos (desempate por `id`), solo `INDEXED`, stopwords, uso del GIN vía `EXPLAIN`, latencia p95 < 1 s sobre 20 consultas. Versionado (`documents-versioning.integration-spec.ts`, 5): índices creados por la migración, backfill SQL == `buildDocumentKey`, búsqueda solo `is_latest`, duplicado sin fila nueva y nueva versión que reemplaza a la anterior contra el repositorio Drizzle real, reintento con los mismos bytes sobre una última versión en `ERROR`. Atomicidad (`documents-atomicity.integration-spec.ts`, 5, contra Postgres **y** pg-boss reales): fila y job confirmados juntos; fallo tras el `INSERT` del job → ni fila, ni job, ni archivo; dos cargas concurrentes de la misma clave → `1.0.0` y `1.0.1` con exactamente un `is_latest`; el sweeper marca `ERROR` una fila de 20 min y deja intacta una de 1 min, con evento SSE; `markFailedIfProcessing` sobre una fila `INDEXED` devuelve `false` y no cambia nada | Testcontainers `postgres:16-alpine` o `TEST_DATABASE_URL`; migraciones reales; 300 docs + fixtures | 21 pruebas en 3 suites (11 + 5 + 5) en `backend/test/` |
-| Frontend | Validación de carga, `useSearch` (debounce y URL), `SearchPage`, `SearchResultCard`, `useDocumentEvents` (patch de caché, toasts, reconexión y resincronización), `useUploadDocuments` (carrera evento-antes-del-202, alineación de `FormData`, polling), `UploadPage` (límite de 20 archivos; prellenado desde la inspección sin pisar lo tipeado, pista de origen, formulario usable si la inspección falla), `TrackedUploadsList` (duplicado y versión asignada), `DocumentPage`, `MetadataPanel` (historial de versiones) y `OutdatedVersionBanner`, `highlight`, `status` | Vitest + Testing Library + MSW; `EventSource` simulado (`frontend/src/test/mockEventSource.ts`) | 61 pruebas en 12 archivos |
+| Frontend | Validación de carga, `useSearch` (debounce y URL), `SearchPage`, `SearchResultCard`, `useDocumentEvents` (patch de caché, toasts, reconexión y resincronización), `useUploadDocuments` (carrera evento-antes-del-202, alineación de `FormData`, polling), `UploadPage` (límite de 20 archivos; prellenado desde la inspección sin pisar lo tipeado, pista de origen, formulario usable si la inspección falla), `TrackedUploadsList` (duplicado y versión asignada), `DocumentPage` (ids de `h2`, sin control de descarga, aviso de versión antigua), `MetadataPanel` (historial de versiones) y `OutdatedVersionBanner`, `highlight`, `status`, `theme` (valor guardado, `matchMedia`, conmutador), `AppShell` (rail, modo noche, índice), `markdownOutline`, `TableOfContents`, `StatusDot`, `Button`, `FileDropzone`, `SearchBar` | Vitest + Testing Library + MSW; `EventSource` simulado (`frontend/src/test/mockEventSource.ts`) | 115 pruebas en 20 archivos (`Test Files  20 passed (20)` / `Tests  115 passed (115)`) |
 
 Comandos: `pnpm test` (unitarias de todos los paquetes), `pnpm --filter backend test:integration`
 (requiere Docker o `TEST_DATABASE_URL`), `pnpm lint` (`tsc --noEmit`).

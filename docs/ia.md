@@ -10,6 +10,7 @@ incluye los errores de la IA y los incidentes, no solo los aciertos.
 | Herramienta | Modelo | Modo de uso |
 |---|---|---|
 | Claude Code (aplicación de escritorio de Claude) | Claude Fable 5.1 | Primero en **modo plan** (lectura del PDF, extracción de requisitos, decisiones una a una). Después como **orquestador**: un hilo principal delgado que delegó cada fase a sub-agentes con un brief escrito y sintetizó sus resultados |
+| Claude Design (lienzo de diseño dentro de la aplicación de escritorio de Claude, pestaña Code) | Claude Fable 5.1 | Exploración visual del rediseño del frontend (fase 8) en un lienzo de cinco mesas de trabajo: Buscar, Lector, Cargar, Lector modo noche y Fundamentos (paleta día/noche con ratios de contraste, tipografía, componentes y reglas). El candidato revisó y aprobó el lienzo antes de escribir código; con la aprobación exigió responsive de primera clase y que las herramientas quedaran registradas en esta documentación. Lienzo: <https://claude.ai/artifact/TZ1ZE9HYMMuvuQ14y4uQAo> |
 
 Tipos de sub-agente empleados por el orquestador:
 
@@ -23,8 +24,8 @@ Tipos de sub-agente empleados por el orquestador:
   código en la mano antes de que se corrija nada; solo lo que sobrevive entra al ciclo de
   corrección.
 
-No se utilizó ninguna otra herramienta de IA (ni autocompletado en el editor, ni generadores de
-imágenes, ni otros modelos).
+Aparte de Claude Code y Claude Design no se utilizó ninguna otra herramienta de IA (ni
+autocompletado en el editor, ni generadores de imágenes, ni otros modelos).
 
 ## 2. Casos de uso de IA por etapa
 
@@ -43,10 +44,11 @@ describe en la sección 4 y en el recorrido previo a la sustentación.
 | Implementación TDD (fases 2-4) | Dominio, casos de uso y adaptadores de `documents`, `search` y `notifications`, escribiendo primero la especificación que falla | Sesión orquestadora: re-ejecutó las suites tras cada fase; revisiones y refutaciones independientes antes de cada corrección |
 | Pruebas de integración | Suite con Testcontainers para `PostgresSearchEngine`, incluida la aserción sobre `EXPLAIN` | Sesión orquestadora: reprodujo el `EXPLAIN (ANALYZE)` contra el Postgres del stack Docker |
 | Scripts de seed y bench | `backend/scripts/seed.ts` (300 documentos sintéticos reproducibles), `bench-search.ts`, `generate-sample-pdfs.ts` | Sesión orquestadora: reprodujo el bench contra el stack Docker; esas son las cifras de `architecture.md` |
-| Frontend (fase 5) | SPA React + Vite: carga con metadatos por archivo, búsqueda con highlight seguro y paginación, visor con Markdown, SSE con parche de caché y toasts; 44 pruebas | Sesión orquestadora: navegó la aplicación en el stack Docker (búsqueda con resaltado y latencia, visor, página de carga, indicador SSE); candidato: recorrido manual de la sección 5 antes de la sustentación |
+| Frontend (fase 5) | SPA React + Vite: carga con metadatos por archivo, búsqueda con highlight seguro y paginación, visor con Markdown, SSE con parche de caché y toasts; 44 pruebas en 10 archivos al cerrar la fase (98 pruebas en 19 archivos tras el rediseño de la fase 8 y su ronda de revisión; 108 pruebas en 20 archivos tras integrar el versionado de la iteración 2; 115 en 20 tras integrar los metadatos sugeridos de la iteración 3) | Sesión orquestadora: navegó la aplicación en el stack Docker (búsqueda con resaltado y latencia, visor, página de carga, indicador SSE); candidato: recorrido manual de la sección 5 antes de la sustentación |
 | Revisión y refutación | Reviewers independientes por fase; refuters sobre los hallazgos críticos | Sesión orquestadora: aplicó el protocolo (refutar antes de corregir, re-revisar el diff del fix); candidato: informado de cada hallazgo y de su corrección |
 | Documentación (fase 6) | Borradores de `docs/architecture.md`, `docs/ia.md` y `README.md` a partir del plan, el código y el log; el agente listó las afirmaciones que no pudo verificar | Sesión orquestadora: corrigió cifras y conteos con los valores reproducidos; candidato: revisión final y responsabilidad del contenido en la sustentación |
 | Iteración 2: versionado por contenido | A partir de las cuatro mejoras propuestas por el candidato, la IA presentó alcance, riesgo y esfuerzo de cada una; implementó la elegida (identidad `document_key`, huella `content_hash`, semver tolerante, `is_latest`, búsqueda solo de la última versión, historial en el visor) con TDD, migración con backfill y suite de integración propia; redactó el roadmap de las tres restantes | Candidato: decidió implementar solo el versionado y posponer las otras tres por plazo; fijó la semántica tras discusión (duplicado ≠ patch). Sesión orquestadora: re-ejecutó suites y lint, lanzó revisión y refutación independientes (sección 4.2) y verificó el flujo contra el stack Docker |
+| Rediseño visual (fase 8) | Claude Design produjo el lienzo de cinco mesas de trabajo (sección 1). Claude Code, en modo plan, exploró el frontend con dos sub-agentes y redactó el plan con un tercero; después cuatro agentes escritores en secuencia implementaron las unidades (tokens semánticos y modo noche, átomos y moléculas, estado como punto y palabra, shell con rail lateral, búsqueda, carga, lector con índice, documentación), cada una en orden TDD y con un commit convencional. Al integrar la rama con el versionado de la iteración 2, la lista de cargas (duplicados, versión asignada), el historial de versiones y el aviso de versión antigua se portaron al sistema de tokens conservando su comportamiento y sus pruebas | Candidato: revisó y aprobó el lienzo antes de implementar y fijó dos requisitos (responsive de primera clase y registro de las herramientas en la documentación). Sesión orquestadora: contrastó cada entrega con el diff, re-ejecutó la suite (98 pruebas en 19 archivos tras la ronda de revisión; 108 en 20 tras integrar el versionado), `tsc --noEmit`, `vite build` y `docker compose build frontend`, barrió el código en busca de clases de la paleta original y recorrió la aplicación a 375, 768 y 1280 px en modo día y noche |
 | Iteración 3: atomicidad, sweeper y metadata sugerida | Con el contrato compartido definido primero (`packages/shared`: `InspectResponse`, `UnitOfWork`), tres writers en paralelo sobre rutas disjuntas: backend de atomicidad (`DrizzleUnitOfWork`, lock por clave, `markFailedIfProcessing`, sweeper programado con pg-boss, suite de integración contra Postgres y pg-boss reales), backend de inspección (`POST /documents/inspect`, `MetadataExtractor` con extractores PDF/Markdown/texto) y frontend (prellenado sin pisar lo tipeado); un cuarto agente para la documentación | Candidato: eligió implementar los puntos 2 y 3 y dejar el 4 (chunking) en roadmap; eligió transacción única sobre outbox y endpoint separado sobre enriquecer en el worker. Sesión orquestadora: re-ejecutó `pnpm test`, `pnpm lint` y las tres suites de integración; revisión y refutación independientes. El recorrido manual del candidato sobre esta iteración está pendiente (sección 5) |
 
 ## 3. Prompts clave y cómo fueron refinados
@@ -254,13 +256,16 @@ se dejan vacías a propósito: solo se marcan tras ejecutar cada paso.
       en el host) y comprobar que la tabla `documents` tiene 300 filas.
 - [ ] Abrir la UI, ir a Cargar y subir `docs/samples/sample-spec.txt`,
       `docs/samples/sample-manual.md` y `docs/samples/sample-guide.pdf` con metadatos; recibir
-      `202` y ver los tres en estado PROCESANDO.
-- [ ] Observar, sin refrescar, el paso a INDEXADO por SSE y el toast correspondiente; verificar
+      `202` y ver los tres en estado «Procesando».
+- [ ] Observar, sin refrescar, el paso a «Indexado» por SSE y el toast correspondiente; verificar
       en las herramientas del navegador que `/events` muestra `event: document.status` con `id`.
 - [ ] Buscar una frase presente en uno de los archivos subidos; verificar highlight con
-      `<mark>`, paginación y el badge de latencia (`tookMs` y `X-Response-Time`).
+      `<mark>`, paginación y el texto de latencia (`tookMs` y `X-Response-Time`).
 - [ ] Abrir el visor desde un resultado; verificar metadatos, cuerpo renderizado (Markdown) y
       etiqueta de estado.
+- [ ] Activar «Modo noche» desde el pie del rail, recargar la página y confirmar que la
+      preferencia persiste; con un documento Markdown abierto y la ventana a 1024 px o más,
+      ver en el rail el índice «En este documento» con sus encabezados.
 - [ ] Subir `docs/samples/sample-blank.pdf` y provocar un estado ERROR con motivo
       "El documento no contiene texto extraíble. Verifica que el archivo tenga contenido de
       texto.", notificado por SSE y visible en el visor.

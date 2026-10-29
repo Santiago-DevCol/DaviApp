@@ -4,14 +4,14 @@ import { isDocumentStatus, presentStatus, statusLabel } from './status';
 
 describe('status presentation', () => {
   it('maps every API status to its Spanish label and tone', () => {
-    expect(presentStatus(DocumentStatus.PROCESSING)).toEqual({ label: 'PROCESANDO', tone: 'info' });
-    expect(presentStatus(DocumentStatus.INDEXED)).toEqual({ label: 'INDEXADO', tone: 'success' });
-    expect(presentStatus(DocumentStatus.ERROR)).toEqual({ label: 'ERROR', tone: 'danger' });
+    expect(presentStatus(DocumentStatus.PROCESSING)).toEqual({ label: 'Procesando', tone: 'info' });
+    expect(presentStatus(DocumentStatus.INDEXED)).toEqual({ label: 'Indexado', tone: 'success' });
+    expect(presentStatus(DocumentStatus.ERROR)).toEqual({ label: 'Error', tone: 'danger' });
   });
 
   it('covers the whole enum', () => {
     for (const status of Object.values(DocumentStatus)) {
-      expect(statusLabel(status)).toMatch(/^(PROCESANDO|INDEXADO|ERROR)$/);
+      expect(statusLabel(status)).toMatch(/^(Procesando|Indexado|Error)$/);
     }
   });
 

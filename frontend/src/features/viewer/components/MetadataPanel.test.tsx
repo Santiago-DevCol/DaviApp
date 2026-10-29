@@ -21,7 +21,7 @@ describe('MetadataPanel', () => {
       'href',
       `/documents/${INDEXED_DOC.id}`,
     );
-    expect(within(items[0]!).getByText('INDEXADO')).toBeInTheDocument();
+    expect(within(items[0]!).getByText('Indexado')).toBeInTheDocument();
   });
 
   it('shows the shortened content hash as a fingerprint and never the document key', () => {

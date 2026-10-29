@@ -6,10 +6,11 @@ export interface ToastListProps {
   onDismiss: (id: number) => void;
 }
 
-const TONES = {
-  info: 'border-sky-200 bg-sky-50 text-sky-900',
-  success: 'border-emerald-200 bg-emerald-50 text-emerald-900',
-  danger: 'border-red-200 bg-red-50 text-red-900',
+/** Tone is carried by a small dot instead of a tinted box. */
+const TONE_DOT = {
+  info: 'bg-accent',
+  success: 'bg-ok',
+  danger: 'bg-bad',
 } as const;
 
 /** Presentational toast stack; the viewport is a polite live region for screen readers. */
@@ -24,16 +25,22 @@ export function ToastList({ toasts, onDismiss }: ToastListProps) {
         <div
           key={toast.id}
           role="status"
-          className={`pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-lg border px-3 py-2 text-sm shadow-md ${TONES[toast.tone]}`}
+          className="pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-xl border border-line bg-raised px-4 py-3 text-[15px] text-ink"
         >
+          <span
+            aria-hidden="true"
+            className={`mt-2 h-2 w-2 shrink-0 rounded-full ${TONE_DOT[toast.tone]}`}
+          />
           <div className="min-w-0 flex-1">
-            <p className="font-semibold">{toast.title}</p>
-            {toast.description && <p className="truncate text-xs opacity-90">{toast.description}</p>}
+            <p className="font-bold">{toast.title}</p>
+            {toast.description && (
+              <p className="truncate text-[13px] text-ink-soft">{toast.description}</p>
+            )}
             {toast.href && (
               <Link
                 to={toast.href}
                 onClick={() => onDismiss(toast.id)}
-                className="mt-1 inline-block text-xs font-medium underline"
+                className="mt-1 inline-block text-[13px] text-accent underline focus-ring"
               >
                 Ver documento
               </Link>
@@ -43,9 +50,9 @@ export function ToastList({ toasts, onDismiss }: ToastListProps) {
             type="button"
             onClick={() => onDismiss(toast.id)}
             aria-label="Cerrar notificación"
-            className="rounded px-1 text-base leading-none opacity-70 hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="-mr-2 -mt-1 grid h-11 w-11 shrink-0 place-items-center rounded-lg text-xl leading-none text-ink-soft hover:bg-surface hover:text-ink focus-ring"
           >
-            &times;
+            <span aria-hidden="true">&times;</span>
           </button>
         </div>
       ))}

@@ -65,15 +65,15 @@ export function MetadataForm({
   return (
     <fieldset
       disabled={disabled}
-      className={`rounded-lg border bg-white p-4 ${fileError ? 'border-red-300' : 'border-slate-200'}`}
+      className={`flex flex-col gap-4 rounded-xl border bg-surface p-5 ${fileError ? 'border-bad' : 'border-line'}`}
     >
       <legend className="sr-only">Metadatos de {fileName}</legend>
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-900" title={fileName}>
+          <p className="truncate font-bold text-ink" title={fileName}>
             {fileName}
           </p>
-          <p className="text-xs text-slate-500">
+          <p className="text-[13px] text-ink-label">
             {formatBytes(sizeBytes)}
             {pages !== undefined && (
               <>
@@ -83,38 +83,40 @@ export function MetadataForm({
             )}
           </p>
           {inspection === 'pending' && (
-            <p role="status" className="text-xs text-slate-400">
+            <p role="status" className="text-[13px] text-ink-label">
               Analizando archivos…
             </p>
           )}
           {inspection === 'failed' && (
-            <p role="status" className="text-xs text-amber-700">
+            <p role="status" className="text-[13px] text-busy">
               No se pudieron sugerir metadatos
             </p>
           )}
         </div>
-        <Button variant="ghost" size="sm" onClick={onRemove} disabled={disabled}>
+        <Button variant="quiet" onClick={onRemove} disabled={disabled}>
           Quitar
         </Button>
       </div>
 
       {fileError && (
-        <p role="alert" className="mb-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-800">
+        <p role="alert" className="text-[13px] text-bad">
           {fileError}
         </p>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <FormField id={field('title')} label="Título" required error={errors.title} hint={hint('title')}>
-          <Input
-            id={field('title')}
-            value={value.title}
-            invalid={Boolean(errors.title)}
-            aria-describedby={describedBy(field('title'), errors.title, hint('title'))}
-            onChange={(event) => update({ title: event.target.value })}
-            maxLength={200}
-          />
-        </FormField>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="md:col-span-2">
+          <FormField id={field('title')} label="Título" required error={errors.title} hint={hint('title')}>
+            <Input
+              id={field('title')}
+              value={value.title}
+              invalid={Boolean(errors.title)}
+              aria-describedby={describedBy(field('title'), errors.title, hint('title'))}
+              onChange={(event) => update({ title: event.target.value })}
+              maxLength={200}
+            />
+          </FormField>
+        </div>
         <FormField id={field('author')} label="Autor" required error={errors.author} hint={hint('author')}>
           <Input
             id={field('author')}
@@ -158,7 +160,7 @@ export function MetadataForm({
             maxLength={200}
           />
         </FormField>
-        <div className="sm:col-span-2">
+        <div className="md:col-span-2">
           <FormField id={field('tags')} label="Etiquetas" error={errors.tags} hint={hint('tags')}>
             <TagsInput
               id={field('tags')}

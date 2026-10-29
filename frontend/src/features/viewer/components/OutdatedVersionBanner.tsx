@@ -12,14 +12,11 @@ export function OutdatedVersionBanner({ document }: OutdatedVersionBannerProps) 
   return (
     <div
       role="note"
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-line bg-surface px-5 py-3 text-[13px]"
     >
-      <span>Existe una versión más reciente</span>
+      <span className="font-bold text-busy">Existe una versión más reciente</span>
       {latest && (
-        <Link
-          to={`/documents/${latest.id}`}
-          className="font-medium text-amber-900 underline focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
-        >
+        <Link to={`/documents/${latest.id}`} className="rounded-sm text-accent underline focus-ring">
           Ver v{latest.version}
         </Link>
       )}
