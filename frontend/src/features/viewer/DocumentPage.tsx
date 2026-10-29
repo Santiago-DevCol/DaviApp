@@ -79,7 +79,7 @@ export function DocumentPage() {
 
       {data && (
         <div className="grid gap-8 lg:grid-cols-[minmax(0,68ch)_minmax(0,280px)] lg:items-start">
-          <article className="order-2 flex min-w-0 flex-col gap-6 lg:order-1">
+          <article className="flex min-w-0 flex-col gap-6">
             <header className="flex flex-col gap-2">
               <p className="text-[13px] text-ink-label">
                 {data.category} · v{data.version}
@@ -102,7 +102,7 @@ export function DocumentPage() {
               </p>
             )}
           </article>
-          <div className="order-1 lg:order-2">
+          <div className="min-w-0">
             <MetadataPanel document={data} />
           </div>
         </div>
