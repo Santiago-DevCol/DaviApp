@@ -71,8 +71,8 @@ describe('DocumentsController (e2e)', () => {
 
       expect(response.body).toEqual({
         items: [
-          { id: FIXTURE_IDS[0], status: DocumentStatus.PROCESSING, fileName: 'manual.md' },
-          { id: FIXTURE_IDS[1], status: DocumentStatus.PROCESSING, fileName: 'spec.txt' },
+          { id: FIXTURE_IDS[0], status: DocumentStatus.PROCESSING, fileName: 'manual.md', version: '1.0.0' },
+          { id: FIXTURE_IDS[1], status: DocumentStatus.PROCESSING, fileName: 'spec.txt', version: '1.0.0' },
         ],
       });
       expect(queue.enqueued).toEqual([FIXTURE_IDS[0], FIXTURE_IDS[1]]);
@@ -89,8 +89,33 @@ describe('DocumentsController (e2e)', () => {
         .expect(202);
 
       expect(response.body).toEqual({
-        items: [{ id: ACCENTED_UPLOAD_ID, status: DocumentStatus.PROCESSING, fileName: 'Guía técnica.txt' }],
+        items: [
+          { id: ACCENTED_UPLOAD_ID, status: DocumentStatus.PROCESSING, fileName: 'Guía técnica.txt', version: '1.0.0' },
+        ],
       });
+    });
+
+    it('reports a re-upload of identical bytes as duplicateOf the existing document (still 202)', async () => {
+      const jobsBefore = queue.enqueued.length;
+
+      const response = await request(app.getHttpServer())
+        .post('/documents')
+        .field('metadata', JSON.stringify([validMetadata('Manual')]))
+        .attach('files', Buffer.from('# Manual'), { filename: 'manual-copy.md', contentType: 'text/markdown' })
+        .expect(202);
+
+      expect(response.body).toEqual({
+        items: [
+          {
+            id: FIXTURE_IDS[0],
+            status: DocumentStatus.PROCESSING,
+            fileName: 'manual-copy.md',
+            version: '1.0.0',
+            duplicateOf: { id: FIXTURE_IDS[0], version: '1.0.0' },
+          },
+        ],
+      });
+      expect(queue.enqueued).toHaveLength(jobsBefore);
     });
 
     it('returns a structured 400 when metadata is not a JSON array', async () => {
@@ -196,6 +221,9 @@ describe('DocumentsController (e2e)', () => {
         fileName: 'spec.txt',
         status: DocumentStatus.INDEXED,
         content: 'Spec body',
+        documentKey: 'crane manual|ana torres',
+        isLatest: true,
+        versions: [{ id: FIXTURE_IDS[2], version: '1.0.0', status: DocumentStatus.INDEXED, isLatest: true }],
       });
     });
   });

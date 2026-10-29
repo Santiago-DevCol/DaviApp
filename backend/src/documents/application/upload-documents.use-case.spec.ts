@@ -1,4 +1,5 @@
 import { DocumentMetadataInput, DocumentStatus } from '@techdocs/shared';
+import { createHash } from 'node:crypto';
 import {
   FileTooLargeError,
   InvalidUploadBatchError,
@@ -18,8 +19,12 @@ function file(fileName: string, text = 'hello', mimeType = 'application/octet-st
   return { fileName, mimeType, sizeBytes: buffer.byteLength, buffer };
 }
 
-function metadata(title: string): DocumentMetadataInput {
-  return { title, author: 'Ana', category: 'manuals', tags: ['crane'], version: '1.0.0' };
+function metadata(title: string, overrides: Partial<DocumentMetadataInput> = {}): DocumentMetadataInput {
+  return { title, author: 'Ana', category: 'manuals', tags: ['crane'], version: '1.0.0', ...overrides };
+}
+
+function sha256(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
 describe('UploadDocumentsUseCase', () => {
@@ -49,8 +54,8 @@ describe('UploadDocumentsUseCase', () => {
 
     expect(response).toEqual({
       items: [
-        { id: FIXTURE_IDS[0], status: DocumentStatus.PROCESSING, fileName: 'manual.md' },
-        { id: FIXTURE_IDS[1], status: DocumentStatus.PROCESSING, fileName: 'spec.txt' },
+        { id: FIXTURE_IDS[0], status: DocumentStatus.PROCESSING, fileName: 'manual.md', version: '1.0.0' },
+        { id: FIXTURE_IDS[1], status: DocumentStatus.PROCESSING, fileName: 'spec.txt', version: '1.0.0' },
       ],
     });
 
@@ -62,6 +67,9 @@ describe('UploadDocumentsUseCase', () => {
       storageKey: `${FIXTURE_IDS[0]}.md`,
       status: DocumentStatus.PROCESSING,
       sizeBytes: 8,
+      documentKey: 'manual|ana',
+      contentHash: sha256('# Manual'),
+      isLatest: true,
     });
     expect(repository.get(FIXTURE_IDS[1])).toMatchObject({ format: 'txt', title: 'Spec' });
 
@@ -117,5 +125,119 @@ describe('UploadDocumentsUseCase', () => {
     expect(stored?.status).toBe(DocumentStatus.ERROR);
     expect(stored?.errorMessage).toBe('Failed to enqueue indexing job');
     expect(storage.files.has(`${FIXTURE_IDS[0]}.md`)).toBe(true);
+  });
+  describe('versioning by document key', () => {
+    const upload = (fileName: string, text: string, meta: DocumentMetadataInput) =>
+      useCase.execute({ files: [file(fileName, text, 'text/plain')], metadata: [meta] });
+
+    it('reports an exact duplicate (same key, same bytes) without creating a row, a file or a job', async () => {
+      await upload('v1.txt', 'same bytes', metadata('Manual'));
+      storage.files.clear();
+      queue.enqueued.length = 0;
+
+      const response = await upload('retry.txt', 'same bytes', metadata('Manual', { version: '2.0.0' }));
+
+      expect(response.items).toEqual([
+        {
+          id: FIXTURE_IDS[0],
+          status: DocumentStatus.PROCESSING,
+          fileName: 'retry.txt',
+          version: '1.0.0',
+          duplicateOf: { id: FIXTURE_IDS[0], version: '1.0.0' },
+        },
+      ]);
+      expect(repository.count()).toBe(1);
+      expect(storage.files.size).toBe(0);
+      expect(queue.enqueued).toEqual([]);
+    });
+
+    it('still reports a duplicate when title or author only differ in case, accents or spacing', async () => {
+      await upload('v1.txt', 'same bytes', metadata('Guía Técnica', { author: 'José Pérez' }));
+
+      const response = await upload('v1.txt', 'same bytes', metadata('  guia   tecnica ', { author: 'jose perez' }));
+
+      expect(response.items[0].duplicateOf).toEqual({ id: FIXTURE_IDS[0], version: '1.0.0' });
+      expect(repository.count()).toBe(1);
+    });
+
+    it('creates a new version with an automatic patch bump when the sent version is not greater', async () => {
+      await upload('v1.txt', 'first draft', metadata('Manual', { version: '1.2.3' }));
+
+      const response = await upload('v2.txt', 'second draft', metadata('Manual', { version: '1.0.0' }));
+
+      expect(response.items).toEqual([
+        { id: FIXTURE_IDS[1], status: DocumentStatus.PROCESSING, fileName: 'v2.txt', version: '1.2.4' },
+      ]);
+      const created = repository.get(FIXTURE_IDS[1]);
+      expect(created).toMatchObject({ version: '1.2.4', isLatest: true, contentHash: sha256('second draft') });
+      expect(repository.get(FIXTURE_IDS[0])).toMatchObject({ version: '1.2.3', isLatest: false });
+      expect(queue.enqueued).toEqual([FIXTURE_IDS[0], FIXTURE_IDS[1]]);
+      expect(storage.files.get(`${FIXTURE_IDS[1]}.txt`)?.toString()).toBe('second draft');
+    });
+
+    it('bumps the patch too when the sent version equals the latest one', async () => {
+      await upload('v1.txt', 'first draft', metadata('Manual', { version: '1.0.0' }));
+
+      const response = await upload('v2.txt', 'second draft', metadata('Manual', { version: '1.0.0' }));
+
+      expect(response.items[0].version).toBe('1.0.1');
+    });
+
+    it('keeps a sent version that is greater than the latest one', async () => {
+      await upload('v1.txt', 'first draft', metadata('Manual', { version: '1.0.0' }));
+
+      const response = await upload('v2.txt', 'second draft', metadata('Manual', { version: '2.0.0' }));
+
+      expect(response.items[0]).toMatchObject({ id: FIXTURE_IDS[1], version: '2.0.0' });
+      expect(repository.get(FIXTURE_IDS[1])?.isLatest).toBe(true);
+      expect(repository.get(FIXTURE_IDS[0])?.isLatest).toBe(false);
+    });
+
+    it('supersedes only the previous latest version, leaving older ones untouched', async () => {
+      await upload('v1.txt', 'one', metadata('Manual', { version: '1.0.0' }));
+      await upload('v2.txt', 'two', metadata('Manual', { version: '1.1.0' }));
+
+      await upload('v3.txt', 'three', metadata('Manual', { version: '1.2.0' }));
+
+      expect(repository.get(FIXTURE_IDS[0])?.isLatest).toBe(false);
+      expect(repository.get(FIXTURE_IDS[1])?.isLatest).toBe(false);
+      expect(repository.get(FIXTURE_IDS[2])?.isLatest).toBe(true);
+    });
+
+    it('treats a different identity with the same bytes as a brand-new document', async () => {
+      await upload('a.txt', 'shared bytes', metadata('Manual A'));
+
+      const response = await upload('b.txt', 'shared bytes', metadata('Manual B'));
+
+      expect(response.items[0]).toEqual({
+        id: FIXTURE_IDS[1],
+        status: DocumentStatus.PROCESSING,
+        fileName: 'b.txt',
+        version: '1.0.0',
+      });
+      expect(repository.count()).toBe(2);
+      expect(repository.get(FIXTURE_IDS[0])?.isLatest).toBe(true);
+    });
+
+    it('treats a typo in the title (same author, different bytes) as another identity, not a new version', async () => {
+      await upload('a.txt', 'one', metadata('Crane manual'));
+
+      const response = await upload('b.txt', 'two', metadata('Crane manuel'));
+
+      expect(response.items[0].version).toBe('1.0.0');
+      expect(repository.get(FIXTURE_IDS[0])?.isLatest).toBe(true);
+      expect(repository.get(FIXTURE_IDS[1])?.isLatest).toBe(true);
+    });
+
+    it('marks the new version as ERROR but keeps the previous one superseded when enqueue fails', async () => {
+      await upload('v1.txt', 'one', metadata('Manual'));
+      const failure = new Error('queue unavailable');
+      queue.failWith(failure);
+
+      await expect(upload('v2.txt', 'two', metadata('Manual'))).rejects.toBe(failure);
+
+      expect(repository.get(FIXTURE_IDS[1])).toMatchObject({ status: DocumentStatus.ERROR, isLatest: true });
+      expect(repository.get(FIXTURE_IDS[0])?.isLatest).toBe(false);
+    });
   });
 });

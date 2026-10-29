@@ -19,6 +19,7 @@ export class GetDocumentUseCase {
     if (!document) {
       throw new DocumentNotFoundError(id);
     }
-    return toDocumentDetail(document);
+    const versions = await this.repository.listVersionsByKey(document.documentKey);
+    return toDocumentDetail(document, versions);
   }
 }

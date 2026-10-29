@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { DocumentFormat, DocumentStatus } from '@techdocs/shared';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { Database } from '../../../shared/database/database.provider';
 import { DRIZZLE } from '../../../shared/database/database.provider';
 import { documents, DocumentRow, NewDocumentRow } from '../../../shared/database/schema';
@@ -33,9 +33,38 @@ export class DrizzleDocumentRepository implements DocumentRepository {
         status: document.status,
         errorMessage: document.errorMessage,
         content: document.content,
+        isLatest: document.isLatest,
         updatedAt: document.updatedAt,
       })
       .where(eq(documents.id, document.id));
+  }
+
+  async findByKeyAndHash(documentKey: string, contentHash: string): Promise<Document | null> {
+    const row = await this.db.query.documents.findFirst({
+      where: and(eq(documents.documentKey, documentKey), eq(documents.contentHash, contentHash)),
+      columns: { searchVector: false },
+      orderBy: [desc(documents.createdAt), desc(documents.id)],
+    });
+    return row ? toDomain(row) : null;
+  }
+
+  async findLatestByKey(documentKey: string): Promise<Document | null> {
+    const row = await this.db.query.documents.findFirst({
+      where: and(eq(documents.documentKey, documentKey), eq(documents.isLatest, true)),
+      columns: { searchVector: false },
+      // Defensive: two latest rows can exist after concurrent uploads; pick the newest deterministically.
+      orderBy: [desc(documents.createdAt), desc(documents.id)],
+    });
+    return row ? toDomain(row) : null;
+  }
+
+  async listVersionsByKey(documentKey: string): Promise<Document[]> {
+    const rows = await this.db.query.documents.findMany({
+      where: eq(documents.documentKey, documentKey),
+      columns: { searchVector: false },
+      orderBy: [desc(documents.createdAt), desc(documents.id)],
+    });
+    return rows.map(toDomain);
   }
 }
 
@@ -47,6 +76,9 @@ function toRow(document: Document): NewDocumentRow {
     category: document.category,
     tags: [...document.tags],
     version: document.version,
+    documentKey: document.documentKey,
+    contentHash: document.contentHash,
+    isLatest: document.isLatest,
     fileName: document.fileName,
     format: document.format,
     storageKey: document.storageKey,
@@ -68,6 +100,9 @@ function toDomain(row: DocumentRowWithoutVector): Document {
     category: row.category,
     tags: row.tags,
     version: row.version,
+    documentKey: row.documentKey,
+    contentHash: row.contentHash,
+    isLatest: row.isLatest,
     format: row.format as DocumentFormat,
     storageKey: row.storageKey,
     sizeBytes: row.sizeBytes,

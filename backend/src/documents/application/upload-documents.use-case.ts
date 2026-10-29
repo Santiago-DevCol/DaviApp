@@ -5,13 +5,16 @@ import {
   UploadAcceptedItem,
   UploadAcceptedResponse,
 } from '@techdocs/shared';
+import { createHash } from 'node:crypto';
 import { Document } from '../domain/document';
+import { buildDocumentKey } from '../domain/document-key';
 import { resolveDocumentFormat } from '../domain/document-format';
 import { FileTooLargeError, InvalidUploadBatchError } from '../domain/errors';
 import { DocumentRepository } from '../domain/ports/document.repository';
 import { FileStorage } from '../domain/ports/file-storage';
 import { IdGenerator } from '../domain/ports/id-generator';
 import { JobQueue } from '../domain/ports/job-queue';
+import { bumpPatch, compareVersions } from '../domain/semver';
 
 export interface UploadFileInput {
   fileName: string;
@@ -47,6 +50,17 @@ interface ValidatedUpload {
  * the heavy work (text extraction) to a durable job. The whole batch is
  * validated before any side effect so a single bad file rejects the request
  * without leaving half-written state behind.
+ *
+ * Versioning rules, per file (identity = `documentKey`, fingerprint = SHA-256
+ * of the uploaded bytes):
+ *   1. same identity + same bytes  -> duplicate: nothing is created, the item
+ *      points at the existing document (`duplicateOf`). Bulk retries are idempotent.
+ *   2. same identity + other bytes -> new version: the sent version is kept
+ *      when greater than the latest one, otherwise the latest gets a patch bump;
+ *      the previous latest is superseded (readable, hidden from search).
+ *   3. new identity                -> new document, latest by definition.
+ * Known limit: two concurrent uploads of the same identity are not serialized,
+ * so both may end up `isLatest` (roadmap: advisory lock on the key).
  */
 export class UploadDocumentsUseCase {
   private readonly repository: DocumentRepository;
@@ -93,16 +107,38 @@ export class UploadDocumentsUseCase {
   }
 
   private async accept(upload: ValidatedUpload): Promise<UploadAcceptedItem> {
+    const documentKey = buildDocumentKey(upload.metadata.title, upload.metadata.author);
+    const contentHash = sha256(upload.file.buffer);
+
+    const duplicate = await this.repository.findByKeyAndHash(documentKey, contentHash);
+    if (duplicate) {
+      return {
+        id: duplicate.id,
+        status: duplicate.status,
+        fileName: upload.file.fileName,
+        version: duplicate.version,
+        duplicateOf: { id: duplicate.id, version: duplicate.version },
+      };
+    }
+
+    const previousLatest = await this.repository.findLatestByKey(documentKey);
+    const version = resolveEffectiveVersion(upload.metadata.version, previousLatest?.version);
     const document = Document.create({
       id: this.idGenerator.next(),
       fileName: upload.file.fileName,
-      metadata: upload.metadata,
+      metadata: { ...upload.metadata, version },
       format: upload.format,
       sizeBytes: upload.file.sizeBytes,
+      contentHash,
     });
 
     await this.storage.save(document.storageKey, upload.file.buffer);
     await this.repository.save(document);
+    if (previousLatest) {
+      // Only after the new row exists, so a failed insert never leaves the key without a latest version.
+      previousLatest.supersede();
+      await this.repository.update(previousLatest);
+    }
 
     try {
       await this.queue.enqueueIndexDocument(document.id);
@@ -113,6 +149,23 @@ export class UploadDocumentsUseCase {
       throw error;
     }
 
-    return { id: document.id, status: document.status, fileName: document.fileName };
+    return {
+      id: document.id,
+      status: document.status,
+      fileName: document.fileName,
+      version: document.version,
+    };
   }
+}
+
+function sha256(buffer: Buffer): string {
+  return createHash('sha256').update(buffer).digest('hex');
+}
+
+/** Rule 2: a sent version only wins when it is strictly greater than the latest one. */
+function resolveEffectiveVersion(sent: string, latest: string | undefined): string {
+  if (latest === undefined || compareVersions(sent, latest) > 0) {
+    return sent;
+  }
+  return bumpPatch(latest);
 }
