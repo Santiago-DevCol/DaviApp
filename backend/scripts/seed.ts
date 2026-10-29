@@ -9,6 +9,8 @@
  * `search_vector` column indexes them on insert) and the matching `.md`/`.txt`
  * file is written to STORAGE_DIR so the viewer works for seeded documents too.
  * `--reset` only truncates the table; files left in STORAGE_DIR are harmless.
+ * Every row is its own latest version (`document_key` from title|author,
+ * `content_hash` = sha256 of the generated file, `is_latest = true`).
  * Content is generated from a seeded PRNG, so repeated runs are reproducible.
  */
 import { count, sql } from 'drizzle-orm';

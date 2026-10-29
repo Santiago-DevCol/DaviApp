@@ -4,7 +4,8 @@
  * from a seeded PRNG, so the same seed always yields the same rows.
  */
 import { DocumentStatus } from '@techdocs/shared';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { buildDocumentKey } from '../src/documents/domain/document-key';
 import { NewDocumentRow } from '../src/shared/database/schema';
 
 interface Topic {
@@ -212,16 +213,21 @@ export function buildDocument(random: () => number, index: number): SyntheticDoc
   const id = randomUUID();
   const createdAt = new Date(Date.now() - between(random, 0, 365) * 86_400_000);
   const extraTag = pick(random, ['v' + version.split('.')[0], lang === 'es' ? 'español' : 'english', 'interno']);
+  const author = pick(random, AUTHORS);
 
   return {
     fileContent,
     row: {
       id,
       title,
-      author: pick(random, AUTHORS),
+      author,
       category: topic.category,
       tags: [...topic.tags.slice(0, between(random, 1, topic.tags.length)), extraTag],
       version,
+      // Titles carry a unique index suffix, so every synthetic row is its own latest version.
+      documentKey: buildDocumentKey(title, author),
+      contentHash: createHash('sha256').update(fileContent, 'utf8').digest('hex'),
+      isLatest: true,
       fileName: `${slugify(title)}.${format}`,
       format,
       storageKey: `${id}.${format}`,

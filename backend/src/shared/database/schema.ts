@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   customType,
   index,
   integer,
@@ -38,6 +39,15 @@ export const documents = pgTable(
     category: text('category').notNull(),
     tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
     version: text('version').notNull(),
+    /**
+     * Identity shared by every version of the same work (normalized title|author,
+     * see `documents/domain/document-key.ts`). Backfilled by `0002_document_versioning.sql`.
+     */
+    documentKey: text('document_key').notNull().default(''),
+    /** SHA-256 (hex) of the uploaded bytes; pre-versioning rows keep ''. */
+    contentHash: text('content_hash').notNull().default(''),
+    /** Exactly one version per document key is expected to be the latest; only those are searchable. */
+    isLatest: boolean('is_latest').notNull().default(true),
     /** Original upload name, shown in the UI; the file itself lives under `storage_key`. */
     fileName: text('file_name').notNull().default(''),
     format: text('format').notNull(),
@@ -50,7 +60,15 @@ export const documents = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('documents_search_idx').using('gin', table.searchVector)],
+  (table) => [
+    index('documents_search_idx').using('gin', table.searchVector),
+    /** Latest-version lookup per key (upload flow, search filter). */
+    index('documents_key_latest_idx')
+      .on(table.documentKey)
+      .where(sql`${table.isLatest}`),
+    /** Exact duplicate lookup (same identity, same bytes). */
+    index('documents_key_hash_idx').on(table.documentKey, table.contentHash),
+  ],
 );
 
 export type DocumentRow = typeof documents.$inferSelect;
