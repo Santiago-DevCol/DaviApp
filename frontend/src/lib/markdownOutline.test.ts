@@ -27,6 +27,16 @@ describe('extractHeadings', () => {
     expect(extractHeadings(markdown).map((heading) => heading.text)).toEqual(['Real', 'Otro']);
   });
 
+  it('tracks the opening fence so a shorter inner fence does not close it', () => {
+    const markdown = ['````md', '```', '## Falso', '```', '````', '', '## Real'].join('\n');
+    expect(extractHeadings(markdown)).toEqual([{ id: 'real', text: 'Real', line: 7 }]);
+  });
+
+  it('does not close a backtick fence with a tilde line', () => {
+    const markdown = ['```', '~~~', '## Falso', '```', '## Real'].join('\n');
+    expect(extractHeadings(markdown)).toEqual([{ id: 'real', text: 'Real', line: 5 }]);
+  });
+
   it('strips inline markup from the heading text', () => {
     const markdown = '## **Negrita** y *cursiva* con `código` y [enlace](https://example.com)';
     expect(extractHeadings(markdown)).toEqual([
@@ -38,8 +48,18 @@ describe('extractHeadings', () => {
     expect(extractHeadings('## Cierre ##')).toEqual([{ id: 'cierre', text: 'Cierre', line: 1 }]);
   });
 
+  it('keeps a trailing hash that is part of the text', () => {
+    expect(extractHeadings('## C#')).toEqual([{ id: 'c', text: 'C#', line: 1 }]);
+    expect(extractHeadings('## Uso de C#').map((heading) => heading.text)).toEqual(['Uso de C#']);
+  });
+
   it('deduplicates ids with numeric suffixes', () => {
     const markdown = ['## Pasos', '', '## Pasos', '', '## Pasos'].join('\n');
+    expect(extractHeadings(markdown).map((heading) => heading.id)).toEqual(['pasos', 'pasos-2', 'pasos-3']);
+  });
+
+  it('never emits an id that an earlier heading already produced', () => {
+    const markdown = ['## Pasos', '', '## Pasos 2', '', '## Pasos'].join('\n');
     expect(extractHeadings(markdown).map((heading) => heading.id)).toEqual(['pasos', 'pasos-2', 'pasos-3']);
   });
 

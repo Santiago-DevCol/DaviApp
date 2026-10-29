@@ -1,15 +1,15 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MockEventSource } from '@/test/mockEventSource';
 import { INDEXED_DOC, setDocument } from '@/test/msw/handlers';
 import { createTestQueryClient } from '@/test/render';
 import { AppProviders } from '../providers';
 import { routes } from '../router';
 
-function renderApp(route = '/search') {
-  const router = createMemoryRouter(routes, { initialEntries: [route] });
+function renderApp(route = '/search', state?: unknown) {
+  const router = createMemoryRouter(routes, { initialEntries: [{ pathname: route, state }] });
   return render(
     <AppProviders queryClient={createTestQueryClient()}>
       <RouterProvider router={router} />
@@ -62,14 +62,19 @@ describe('AppShell', () => {
 
   it('lists the Markdown sections of the open document and drops them on navigation', async () => {
     const user = userEvent.setup();
+    Element.prototype.scrollIntoView = vi.fn();
     setDocument({ ...INDEXED_DOC, content: '# Despliegue\n\n## Requisitos\n\nTexto\n\n## Pasos\n\n- Paso uno' });
-    renderApp(`/documents/${INDEXED_DOC.id}`);
+    renderApp(`/documents/${INDEXED_DOC.id}`, { from: '/search?q=kubernetes' });
 
     const outline = await screen.findByRole('navigation', { name: 'En este documento' }, { timeout: 5000 });
     const links = within(outline).getAllByRole('link');
     expect(links.map((link) => link.textContent)).toEqual(['Requisitos', 'Pasos']);
     expect(links[0]).toHaveAttribute('href', '#requisitos');
     expect(links[1]).toHaveAttribute('href', '#pasos');
+
+    // Jumping to a section must keep the search query behind "Volver a resultados".
+    await user.click(within(outline).getByRole('link', { name: 'Requisitos' }));
+    expect(screen.getByRole('link', { name: /Volver a resultados/ })).toHaveAttribute('href', '/search?q=kubernetes');
 
     await user.click(within(screen.getByRole('navigation', { name: 'Principal' })).getByRole('link', { name: 'Buscar' }));
     await waitFor(() => expect(screen.queryByRole('navigation', { name: 'En este documento' })).toBeNull());
