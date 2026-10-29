@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { DocumentsModule } from './documents/infrastructure/documents.module';
 import { HealthModule } from './health/health.module';
+import { InspectionModule } from './inspection/infrastructure/inspection.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SearchModule } from './search/search.module';
 import { validate } from './shared/config/env.schema';
@@ -17,6 +18,7 @@ import { PgBossModule } from './shared/queue/pg-boss.module';
     PgBossModule,
     HealthModule,
     DocumentsModule,
+    InspectionModule,
     SearchModule,
     NotificationsModule,
   ],
