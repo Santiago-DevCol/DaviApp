@@ -34,7 +34,7 @@ export function FileDropzone({ onFiles, accept, disabled = false, hint }: FileDr
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
       className={`flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-8 text-center transition-colors ${
-        dragging ? 'border-accent bg-raised' : 'border-dashed bg-surface'
+        dragging ? 'border-accent bg-raised' : 'border-dropzone bg-surface'
       } ${disabled ? 'opacity-60' : ''}`}
     >
       <p className="text-ink">Arrastra tus archivos aquí o</p>
