@@ -2,7 +2,7 @@
  * One-off generator for the committed PDF samples under docs/samples:
  *   - sample-guide.pdf : one page with a real text layer (indexes as INDEXED)
  *   - sample-blank.pdf : one page with only vector drawing, no text layer
- *                        (ends as ERROR "No extractable text found")
+ *                        (ends as ERROR with the public no-text reason)
  *
  *   pnpm --filter backend exec ts-node scripts/generate-sample-pdfs.ts
  */

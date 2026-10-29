@@ -14,7 +14,8 @@ The endpoint accepts plain text (.txt), Markdown (.md) and PDF (.pdf) files up
 to 10 MiB each and up to 20 files per request. The file extension is
 authoritative; a declared MIME type outside the allow-list is rejected with
 HTTP 400. Files without a text layer (scanned PDFs) are accepted but end in the
-ERROR state with the message "No extractable text found".
+ERROR state with the message "El documento no contiene texto extraíble. Verifica que el
+archivo tenga contenido de texto.".
 
 3. REQUEST CONTRACT
 

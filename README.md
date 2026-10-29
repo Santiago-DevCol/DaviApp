@@ -143,7 +143,7 @@ docker-compose.yml  postgres + backend + frontend (+ opt-in seed profile)
 
 `docs/samples/` contains `sample-manual.md`, `sample-spec.txt`, `sample-guide.pdf`
 and `sample-blank.pdf`. The blank PDF has no extractable text and ends in
-`ERROR` with `"No extractable text found"`, which demonstrates the failure path
+`ERROR` with `"El documento no contiene texto extraíble. Verifica que el archivo tenga contenido de texto."`, which demonstrates the failure path
 in the UI and over SSE.
 
 ## Troubleshooting

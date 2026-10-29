@@ -59,12 +59,12 @@ describe('IndexDocumentUseCase', () => {
 
     const stored = repository.get(FIXTURE_IDS[0]);
     expect(stored?.status).toBe(DocumentStatus.ERROR);
-    expect(stored?.errorMessage).toBe('No extractable text found');
+    expect(stored?.errorMessage).toBe('El documento no contiene texto extraíble. Verifica que el archivo tenga contenido de texto.');
     expect(stored?.content).toBeNull();
     expect(publisher.events[0]).toMatchObject({
       id: FIXTURE_IDS[0],
       status: DocumentStatus.ERROR,
-      errorMessage: 'No extractable text found',
+      errorMessage: 'El documento no contiene texto extraíble. Verifica que el archivo tenga contenido de texto.',
     });
   });
 

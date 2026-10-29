@@ -193,7 +193,8 @@ se dejan vacías a propósito: solo se marcan tras ejecutar cada paso.
 - [ ] Abrir el visor desde un resultado; verificar metadatos, cuerpo renderizado (Markdown) y
       etiqueta de estado.
 - [ ] Subir `docs/samples/sample-blank.pdf` y provocar un estado ERROR con motivo
-      "No extractable text found", notificado por SSE y visible en el visor.
+      "El documento no contiene texto extraíble. Verifica que el archivo tenga contenido de
+      texto.", notificado por SSE y visible en el visor.
 - [ ] Ejecutar en `psql` el `EXPLAIN ANALYZE` de la CTE `hits` para `kubernetes pod` y leer el
       nodo `Bitmap Index Scan on documents_search_idx`; repetir con `de la en` y leer
       `One-Time Filter: false`.

@@ -19,7 +19,8 @@ export interface IndexDocumentDependencies {
   logger?: IndexingLogger;
 }
 
-const NO_TEXT_REASON = 'No extractable text found';
+const NO_TEXT_REASON =
+  'El documento no contiene texto extraíble. Verifica que el archivo tenga contenido de texto.';
 
 /**
  * HU-01 step 2, executed by the background worker. Extraction problems are
