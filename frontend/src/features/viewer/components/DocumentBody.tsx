@@ -11,14 +11,14 @@ export interface DocumentBodyProps {
 
 /**
  * Markdown goes through react-markdown (code-split); txt and extracted PDF
- * text are shown pre-wrapped.
+ * text are shown pre-wrapped in the reading face.
  */
 export function DocumentBody({ format, content }: DocumentBodyProps) {
   if (format === 'md') {
     return (
       <Suspense
         fallback={
-          <div className="flex items-center gap-2 text-sm text-slate-500">
+          <div className="flex items-center gap-2 text-ink-soft">
             <Spinner size="sm" /> Preparando vista…
           </div>
         }
@@ -28,8 +28,6 @@ export function DocumentBody({ format, content }: DocumentBodyProps) {
     );
   }
   return (
-    <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-slate-800">
-      {content}
-    </pre>
+    <pre className="whitespace-pre-wrap break-words font-reading text-[17px] leading-[1.7] text-ink">{content}</pre>
   );
 }

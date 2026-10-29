@@ -1,8 +1,9 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { MockEventSource } from '@/test/mockEventSource';
+import { INDEXED_DOC, setDocument } from '@/test/msw/handlers';
 import { createTestQueryClient } from '@/test/render';
 import { AppProviders } from '../providers';
 import { routes } from '../router';
@@ -58,4 +59,19 @@ describe('AppShell', () => {
     expect(within(main).getByRole('heading', { level: 1, name: 'Buscar' })).toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'En este documento' })).toBeNull();
   });
+
+  it('lists the Markdown sections of the open document and drops them on navigation', async () => {
+    const user = userEvent.setup();
+    setDocument({ ...INDEXED_DOC, content: '# Despliegue\n\n## Requisitos\n\nTexto\n\n## Pasos\n\n- Paso uno' });
+    renderApp(`/documents/${INDEXED_DOC.id}`);
+
+    const outline = await screen.findByRole('navigation', { name: 'En este documento' }, { timeout: 5000 });
+    const links = within(outline).getAllByRole('link');
+    expect(links.map((link) => link.textContent)).toEqual(['Requisitos', 'Pasos']);
+    expect(links[0]).toHaveAttribute('href', '#requisitos');
+    expect(links[1]).toHaveAttribute('href', '#pasos');
+
+    await user.click(within(screen.getByRole('navigation', { name: 'Principal' })).getByRole('link', { name: 'Buscar' }));
+    await waitFor(() => expect(screen.queryByRole('navigation', { name: 'En este documento' })).toBeNull());
+  }, 10_000);
 });

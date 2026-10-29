@@ -26,6 +26,14 @@ beforeAll(async () => {
   const interceptedFetch = globalThis.fetch;
   globalThis.fetch = (input, init) =>
     interceptedFetch(input, init ? { ...init, signal: undefined } : init);
+  // react-router data routers build a `Request` per navigation with the same
+  // jsdom signal, which undici's `Request` rejects just like fetch does.
+  const InterceptedRequest = globalThis.Request;
+  globalThis.Request = class extends InterceptedRequest {
+    constructor(input: RequestInfo | URL, init?: RequestInit) {
+      super(input, init ? { ...init, signal: undefined } : init);
+    }
+  };
 });
 
 beforeEach(() => {

@@ -6,6 +6,7 @@ export interface MetadataPanelProps {
   document: DocumentDetail;
 }
 
+/** Boxless metadata column: status first, then a label/value list; stacks above the article on phones. */
 export function MetadataPanel({ document }: MetadataPanelProps) {
   const rows: Array<[string, string]> = [
     ['Autor', document.author],
@@ -17,32 +18,32 @@ export function MetadataPanel({ document }: MetadataPanelProps) {
   ];
 
   return (
-    <aside aria-label="Metadatos" className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Metadatos</h2>
-        <StatusDot status={document.status} />
-      </div>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
+    <aside aria-label="Metadatos" className="flex flex-col gap-5">
+      <h2 className="sr-only">Metadatos</h2>
+      <StatusDot status={document.status} />
+      <dl className="grid gap-4">
         {rows.map(([label, value]) => (
-          <div key={label} className="contents">
-            <dt className="text-slate-500">{label}</dt>
-            <dd className="break-words text-slate-800">{value}</dd>
+          <div key={label} className="flex flex-col gap-0.5">
+            <dt className="text-xs uppercase tracking-wide text-ink-label">{label}</dt>
+            <dd className="break-words text-[15px] text-ink">{value}</dd>
           </div>
         ))}
-        <dt className="text-slate-500">Etiquetas</dt>
-        <dd>
-          {document.tags.length === 0 ? (
-            <span className="text-slate-400">—</span>
-          ) : (
-            <ul className="flex flex-wrap gap-1">
-              {document.tags.map((tag) => (
-                <li key={tag}>
-                  <Tag>{tag}</Tag>
-                </li>
-              ))}
-            </ul>
-          )}
-        </dd>
+        <div className="flex flex-col gap-1">
+          <dt className="text-xs uppercase tracking-wide text-ink-label">Etiquetas</dt>
+          <dd className="text-[15px] text-ink">
+            {document.tags.length === 0 ? (
+              <span className="text-ink-label">—</span>
+            ) : (
+              <ul className="flex flex-wrap gap-1.5">
+                {document.tags.map((tag) => (
+                  <li key={tag}>
+                    <Tag>{tag}</Tag>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </dd>
+        </div>
       </dl>
     </aside>
   );

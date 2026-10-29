@@ -1,12 +1,42 @@
 import { DocumentStatus } from '@techdocs/shared';
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { MockEventSource } from '@/test/mockEventSource';
 import { INDEXED_DOC, PROCESSING_DOC, setDocument } from '@/test/msw/handlers';
 import { renderWithProviders } from '@/test/render';
 import { DocumentPage } from './DocumentPage';
 
+const OUTLINED_MARKDOWN = '# Despliegue\n\n## Requisitos\n\nTexto\n\n## Pasos\n\n- Paso uno';
+
 describe('DocumentPage', () => {
+  it('gives Markdown section headings an anchor id for the outline', async () => {
+    setDocument({ ...INDEXED_DOC, content: OUTLINED_MARKDOWN });
+    renderWithProviders(<DocumentPage />, {
+      route: `/documents/${INDEXED_DOC.id}`,
+      path: '/documents/:id',
+    });
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Requisitos' }, { timeout: 5000 }),
+    ).toHaveAttribute('id', 'requisitos');
+    expect(screen.getByRole('heading', { level: 2, name: 'Pasos' })).toHaveAttribute('id', 'pasos');
+  }, 10_000);
+
+  it('shows the metadata values in the aside and offers no download control', async () => {
+    renderWithProviders(<DocumentPage />, {
+      route: `/documents/${INDEXED_DOC.id}`,
+      path: '/documents/:id',
+    });
+
+    const aside = await screen.findByRole('complementary', { name: 'Metadatos' });
+    expect(within(aside).getByText(INDEXED_DOC.category)).toBeInTheDocument();
+    expect(within(aside).getByText(INDEXED_DOC.version)).toBeInTheDocument();
+    expect(within(aside).getByText(/k8s-guide\.md/)).toBeInTheDocument();
+    expect(within(aside).getByText('kubernetes')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Descargar/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Descargar/ })).toBeNull();
+  });
+
   it('renders an indexed Markdown document with its metadata', async () => {
     renderWithProviders(<DocumentPage />, {
       route: `/documents/${INDEXED_DOC.id}`,
