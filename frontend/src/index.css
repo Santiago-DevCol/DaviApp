@@ -1,25 +1,79 @@
 @import "tailwindcss";
 
+/*
+ * Semantic design tokens. Plain `@theme` (not `inline`) so utilities compile to
+ * `var(--color-x)` and the night override below flips them at runtime.
+ * `--color-*: initial` drops the stock palette: any leftover `slate-*` class
+ * renders nothing instead of silently keeping the old look.
+ */
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --color-*: initial;
+
+  --font-sans: "Atkinson Hyperlegible", ui-sans-serif, system-ui, sans-serif;
+  --font-reading: "Literata Variable", Georgia, serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --color-ground: #f4f3ee;
+  --color-surface: #fbfaf7;
+  --color-raised: #e9e8e1;
+  --color-line: #dad9d1;
+  --color-edge: #c9c8c0;
+  --color-dashed: #b9b8b0;
+  --color-ink: #26282b;
+  --color-ink-soft: #5e626a;
+  --color-ink-label: #6a6e76;
+  --color-accent: #2f5d62;
+  --color-accent-strong: #244a4e;
+  --color-mark: #efe6a6;
+  --color-mark-ink: #26282b;
+  --color-ok: #3f6b4c;
+  --color-busy: #8a6a1e;
+  --color-bad: #9a4438;
+  --color-code: #ecebe4;
 }
 
 :root {
   color-scheme: light;
 }
 
+/* Night mode: unlayered so it wins over Tailwind's `@layer theme`. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-ground: #1f2124;
+  --color-surface: #272a2e;
+  --color-raised: #30343a;
+  --color-line: #3a3e44;
+  --color-edge: #4a4e55;
+  --color-dashed: #4a4e55;
+  --color-ink: #e4e2db;
+  --color-ink-soft: #b2b0a8;
+  --color-ink-label: #a09e96;
+  --color-accent: #8dbfc2;
+  --color-accent-strong: #a9d3d5;
+  --color-mark: #4c4522;
+  --color-mark-ink: #f1e9b8;
+  --color-ok: #8dba94;
+  --color-busy: #d1b46a;
+  --color-bad: #d3867a;
+  --color-code: #2c2f33;
+}
+
+@utility focus-ring {
+  @apply outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent;
+}
+
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-ground font-sans text-[15px] leading-normal text-ink antialiased;
 }
 
 mark {
-  @apply rounded bg-amber-200 px-0.5 text-slate-900;
+  @apply rounded-sm bg-mark px-0.5 text-mark-ink;
 }
 
 /* Rendered Markdown (react-markdown output). */
 .prose-doc :is(h1, h2, h3, h4) {
-  @apply mt-6 mb-2 font-semibold text-slate-900;
+  @apply mt-6 mb-2 font-semibold text-ink;
 }
 .prose-doc h1 { @apply text-2xl; }
 .prose-doc h2 { @apply text-xl; }
@@ -28,10 +82,10 @@ mark {
 .prose-doc ul { @apply my-3 list-disc pl-6; }
 .prose-doc ol { @apply my-3 list-decimal pl-6; }
 .prose-doc li { @apply my-1; }
-.prose-doc code { @apply rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.9em]; }
-.prose-doc pre { @apply my-3 overflow-x-auto rounded-md bg-slate-900 p-3 text-sm text-slate-100; }
+.prose-doc code { @apply rounded bg-code px-1 py-0.5 font-mono text-[0.9em]; }
+.prose-doc pre { @apply my-3 overflow-x-auto rounded-md bg-code p-3 text-sm text-ink; }
 .prose-doc pre code { @apply bg-transparent p-0 text-inherit; }
-.prose-doc blockquote { @apply my-3 border-l-4 border-slate-300 pl-3 text-slate-600; }
+.prose-doc blockquote { @apply my-3 border-l-4 border-line pl-3 text-ink-soft; }
 .prose-doc table { @apply my-3 w-full border-collapse text-sm; }
-.prose-doc th, .prose-doc td { @apply border border-slate-200 px-2 py-1 text-left; }
-.prose-doc a { @apply text-indigo-700 underline; }
+.prose-doc th, .prose-doc td { @apply border border-line px-2 py-1 text-left; }
+.prose-doc a { @apply text-accent underline; }

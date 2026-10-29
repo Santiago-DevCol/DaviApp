@@ -32,6 +32,8 @@ beforeEach(() => {
   vi.stubGlobal('EventSource', MockEventSource);
   MockEventSource.reset();
   window.sessionStorage.clear();
+  window.localStorage.clear();
+  delete document.documentElement.dataset.theme;
 });
 
 afterEach(() => {
