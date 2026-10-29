@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { DocumentFormat, DocumentStatus } from '@techdocs/shared';
 import { eq } from 'drizzle-orm';
-import { Database, DRIZZLE } from '../../../shared/database/database.provider';
+import type { Database } from '../../../shared/database/database.provider';
+import { DRIZZLE } from '../../../shared/database/database.provider';
 import { documents, DocumentRow, NewDocumentRow } from '../../../shared/database/schema';
 import { Document } from '../../domain/document';
 import { DocumentRepository } from '../../domain/ports/document.repository';

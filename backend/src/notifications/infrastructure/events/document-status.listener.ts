@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { DocumentStatusEvent } from '@techdocs/shared';
+import type { DocumentStatusEvent } from '@techdocs/shared';
 import { DOCUMENT_STATUS_EVENT } from '../../../documents/infrastructure/events/event-emitter.publisher';
 import { NotificationsHub } from './notifications.hub';
 

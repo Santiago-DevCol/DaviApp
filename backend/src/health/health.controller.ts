@@ -1,7 +1,8 @@
 import { Controller, Get, HttpStatus, Inject, Res } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import type { Response } from 'express';
-import { Database, DRIZZLE } from '../shared/database/database.provider';
+import type { Database } from '../shared/database/database.provider';
+import { DRIZZLE } from '../shared/database/database.provider';
 
 export interface HealthResponse {
   status: 'ok' | 'degraded';

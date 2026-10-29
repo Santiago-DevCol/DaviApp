@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { DocumentStatus } from '@techdocs/shared';
 import { sql } from 'drizzle-orm';
-import { Database, DRIZZLE } from '../../../shared/database/database.provider';
+import type { Database } from '../../../shared/database/database.provider';
+import { DRIZZLE } from '../../../shared/database/database.provider';
 import { SearchEngine } from '../../domain/ports/search-engine';
 import { SearchQuery } from '../../domain/search-query';
 import { SearchHit, SearchPage } from '../../domain/search-result';
