@@ -53,7 +53,7 @@ describe('resolveTheme', () => {
   });
 
   it('ignores a stored value that is not a theme', () => {
-    window.localStorage.setItem(THEME_STORAGE_KEY, 'sepia');
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'not-a-theme');
     stubMatchMedia(true);
     expect(resolveTheme()).toBe('dark');
   });

@@ -16,12 +16,12 @@ export function ErrorState({
   return (
     <div
       role="alert"
-      className="flex flex-col items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3"
+      className="flex flex-col items-start gap-2 rounded-xl border border-line bg-surface px-5 py-4"
     >
-      <p className="text-sm font-semibold text-red-800">{title}</p>
-      <p className="text-sm text-red-700">{message}</p>
+      <p className="font-bold text-bad">{title}</p>
+      <p className="text-ink-soft">{message}</p>
       {onRetry && (
-        <Button variant="danger" size="sm" onClick={onRetry} loading={retrying}>
+        <Button variant="secondary" onClick={onRetry} loading={retrying}>
           Reintentar
         </Button>
       )}

@@ -33,15 +33,15 @@ export function FileDropzone({ onFiles, accept, disabled = false, hint }: FileDr
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
-      className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-6 py-10 text-center transition-colors ${
-        dragging ? 'border-indigo-500 bg-indigo-50' : 'border-slate-300 bg-white'
+      className={`flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-8 text-center transition-colors ${
+        dragging ? 'border-accent bg-raised' : 'border-dashed bg-surface'
       } ${disabled ? 'opacity-60' : ''}`}
     >
-      <p className="text-sm font-medium text-slate-800">Arrastra tus archivos aquí</p>
-      <p className="text-xs text-slate-500">o</p>
+      <p className="text-ink">Arrastra tus archivos aquí o</p>
+      {/* The label is the visible control; its only text node must stay exactly "Seleccionar archivos". */}
       <label
         htmlFor={inputId}
-        className={`inline-flex cursor-pointer items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 focus-within:ring-2 focus-within:ring-indigo-500 ${
+        className={`inline-flex min-h-11 cursor-pointer items-center justify-center rounded-lg border border-line bg-surface px-4 text-[15px] font-bold text-ink hover:bg-raised focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent ${
           disabled ? 'pointer-events-none' : ''
         }`}
       >
@@ -61,7 +61,7 @@ export function FileDropzone({ onFiles, accept, disabled = false, hint }: FileDr
           }}
         />
       </label>
-      {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+      {hint && <p className="text-[13px] text-ink-label">{hint}</p>}
     </div>
   );
 }

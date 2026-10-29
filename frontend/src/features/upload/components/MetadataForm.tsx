@@ -57,7 +57,7 @@ export function MetadataForm({
           </p>
           <p className="text-xs text-slate-500">{formatBytes(sizeBytes)}</p>
         </div>
-        <Button variant="ghost" size="sm" onClick={onRemove} disabled={disabled}>
+        <Button variant="quiet" onClick={onRemove} disabled={disabled}>
           Quitar
         </Button>
       </div>

@@ -20,7 +20,7 @@ export function TrackedUploadsList({ entries, onRemove, onClear }: TrackedUpload
         <h2 id="tracked-uploads-title" className="text-sm font-semibold text-slate-800">
           Cargas recientes
         </h2>
-        <Button variant="ghost" size="sm" onClick={onClear}>
+        <Button variant="quiet" onClick={onClear}>
           Limpiar lista
         </Button>
       </div>
