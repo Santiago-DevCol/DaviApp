@@ -14,10 +14,11 @@
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { DocumentStatus } from '@techdocs/shared';
 import { sql } from 'drizzle-orm';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { Pool } from 'pg';
 import { buildDocument, createRandom } from '../scripts/synthetic-documents';
+import { buildDocumentKey } from '../src/documents/domain/document-key';
 import { SearchQuery } from '../src/search/domain/search-query';
 import { SearchHit } from '../src/search/domain/search-result';
 import { PostgresSearchEngine } from '../src/search/infrastructure/persistence/postgres-search.engine';
@@ -58,6 +59,9 @@ function fixture(
     category: 'Fixtures',
     tags: ['fixture'],
     version: '1.0.0',
+    documentKey: buildDocumentKey(title, 'Equipo de pruebas'),
+    contentHash: createHash('sha256').update(content, 'utf8').digest('hex'),
+    isLatest: true,
     fileName: `${id}.md`,
     format: 'md',
     storageKey: `${id}.md`,

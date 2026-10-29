@@ -19,6 +19,13 @@ function entry(overrides: Partial<TrackedUploadView> = {}): TrackedUploadView {
   };
 }
 
+function renderList(entries: TrackedUploadView[]) {
+  return renderWithProviders(<TrackedUploadsList entries={entries} onRemove={vi.fn()} onClear={vi.fn()} />, {
+    route: '/upload',
+    path: '/upload',
+  });
+}
+
 describe('TrackedUploadsList', () => {
   it('shows an indexed upload with its status, a link to the document and a remove control', async () => {
     const user = userEvent.setup();
@@ -91,5 +98,35 @@ describe('TrackedUploadsList', () => {
       <TrackedUploadsList entries={[]} onRemove={() => {}} onClear={() => {}} />,
     );
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('renders a duplicate upload with a link to the existing document and no spinner', () => {
+    renderList([entry({ id: 'existing-1', status: null, duplicateOf: { id: 'existing-1', version: '1.2.0' } })]);
+
+    expect(screen.getByText('Duplicado')).toBeInTheDocument();
+    expect(screen.getByText('Ya existía como versión 1.2.0')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Ver documento' })).toHaveAttribute('href', '/documents/existing-1');
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByText('Consultando estado')).toBeNull();
+  });
+
+  it('shows the assigned version only when it differs from the one sent', () => {
+    renderList([
+      entry({ id: 'bumped', fileName: 'a.txt', status: null, sentVersion: '1.0.0', version: '1.0.1' }),
+      entry({ id: 'same', fileName: 'b.txt', status: null, sentVersion: '2.0.0', version: '2.0.0' }),
+    ]);
+
+    expect(screen.getByText(/Versión asignada: v1\.0\.1/)).toHaveTextContent('enviada v1.0.0');
+    expect(screen.getAllByText(/Versión asignada/)).toHaveLength(1);
+  });
+
+  it('still renders entries persisted before versioning existed', () => {
+    const legacy = entry({ status: DocumentStatus.INDEXED });
+    renderList([legacy]);
+
+    expect(screen.getByText(legacy.title)).toBeInTheDocument();
+    expect(screen.getByText('Indexado')).toBeInTheDocument();
+    expect(screen.queryByText(/Versión asignada/)).toBeNull();
+    expect(screen.queryByText('Duplicado')).toBeNull();
   });
 });

@@ -44,10 +44,11 @@ describe en la sección 4 y en el recorrido previo a la sustentación.
 | Implementación TDD (fases 2-4) | Dominio, casos de uso y adaptadores de `documents`, `search` y `notifications`, escribiendo primero la especificación que falla | Sesión orquestadora: re-ejecutó las suites tras cada fase; revisiones y refutaciones independientes antes de cada corrección |
 | Pruebas de integración | Suite con Testcontainers para `PostgresSearchEngine`, incluida la aserción sobre `EXPLAIN` | Sesión orquestadora: reprodujo el `EXPLAIN (ANALYZE)` contra el Postgres del stack Docker |
 | Scripts de seed y bench | `backend/scripts/seed.ts` (300 documentos sintéticos reproducibles), `bench-search.ts`, `generate-sample-pdfs.ts` | Sesión orquestadora: reprodujo el bench contra el stack Docker; esas son las cifras de `architecture.md` |
-| Frontend (fase 5) | SPA React + Vite: carga con metadatos por archivo, búsqueda con highlight seguro y paginación, visor con Markdown, SSE con parche de caché y toasts; 44 pruebas en 10 archivos al cerrar la fase (98 pruebas en 19 archivos tras el rediseño de la fase 8 y su ronda de revisión) | Sesión orquestadora: navegó la aplicación en el stack Docker (búsqueda con resaltado y latencia, visor, página de carga, indicador SSE); candidato: recorrido manual de la sección 5 antes de la sustentación |
+| Frontend (fase 5) | SPA React + Vite: carga con metadatos por archivo, búsqueda con highlight seguro y paginación, visor con Markdown, SSE con parche de caché y toasts; 44 pruebas en 10 archivos al cerrar la fase (98 pruebas en 19 archivos tras el rediseño de la fase 8 y su ronda de revisión; 108 pruebas en 20 archivos tras integrar el versionado de la iteración 2) | Sesión orquestadora: navegó la aplicación en el stack Docker (búsqueda con resaltado y latencia, visor, página de carga, indicador SSE); candidato: recorrido manual de la sección 5 antes de la sustentación |
 | Revisión y refutación | Reviewers independientes por fase; refuters sobre los hallazgos críticos | Sesión orquestadora: aplicó el protocolo (refutar antes de corregir, re-revisar el diff del fix); candidato: informado de cada hallazgo y de su corrección |
 | Documentación (fase 6) | Borradores de `docs/architecture.md`, `docs/ia.md` y `README.md` a partir del plan, el código y el log; el agente listó las afirmaciones que no pudo verificar | Sesión orquestadora: corrigió cifras y conteos con los valores reproducidos; candidato: revisión final y responsabilidad del contenido en la sustentación |
-| Rediseño visual (fase 8) | Claude Design produjo el lienzo de cinco mesas de trabajo (sección 1). Claude Code, en modo plan, exploró el frontend con dos sub-agentes y redactó el plan con un tercero; después cuatro agentes escritores en secuencia implementaron las unidades (tokens semánticos y modo noche, átomos y moléculas, estado como punto y palabra, shell con rail lateral, búsqueda, carga, lector con índice, documentación), cada una en orden TDD y con un commit convencional | Candidato: revisó y aprobó el lienzo antes de implementar y fijó dos requisitos (responsive de primera clase y registro de las herramientas en la documentación). Sesión orquestadora: contrastó cada entrega con el diff, re-ejecutó la suite (98 pruebas en 19 archivos tras la ronda de revisión), `tsc --noEmit`, `vite build` y `docker compose build frontend`, barrió el código en busca de clases de la paleta original y recorrió la aplicación a 375, 768 y 1280 px en modo día y noche |
+| Iteración 2: versionado por contenido | A partir de las cuatro mejoras propuestas por el candidato, la IA presentó alcance, riesgo y esfuerzo de cada una; implementó la elegida (identidad `document_key`, huella `content_hash`, semver tolerante, `is_latest`, búsqueda solo de la última versión, historial en el visor) con TDD, migración con backfill y suite de integración propia; redactó el roadmap de las tres restantes | Candidato: decidió implementar solo el versionado y posponer las otras tres por plazo; fijó la semántica tras discusión (duplicado ≠ patch). Sesión orquestadora: re-ejecutó suites y lint, lanzó revisión y refutación independientes (sección 4.2) y verificó el flujo contra el stack Docker |
+| Rediseño visual (fase 8) | Claude Design produjo el lienzo de cinco mesas de trabajo (sección 1). Claude Code, en modo plan, exploró el frontend con dos sub-agentes y redactó el plan con un tercero; después cuatro agentes escritores en secuencia implementaron las unidades (tokens semánticos y modo noche, átomos y moléculas, estado como punto y palabra, shell con rail lateral, búsqueda, carga, lector con índice, documentación), cada una en orden TDD y con un commit convencional. Al integrar la rama con el versionado de la iteración 2, la lista de cargas (duplicados, versión asignada), el historial de versiones y el aviso de versión antigua se portaron al sistema de tokens conservando su comportamiento y sus pruebas | Candidato: revisó y aprobó el lienzo antes de implementar y fijó dos requisitos (responsive de primera clase y registro de las herramientas en la documentación). Sesión orquestadora: contrastó cada entrega con el diff, re-ejecutó la suite (98 pruebas en 19 archivos tras la ronda de revisión; 108 en 20 tras integrar el versionado), `tsc --noEmit`, `vite build` y `docker compose build frontend`, barrió el código en busca de clases de la paleta original y recorrió la aplicación a 375, 768 y 1280 px en modo día y noche |
 
 ## 3. Prompts clave y cómo fueron refinados
 
@@ -150,6 +151,7 @@ Correcciones que surgieron de la revisión independiente, no del agente que escr
 | `@techdocs/shared` apuntaba a un `dist/` ignorado por git y nada lo construía tras `pnpm install`; un clon limpio no compilaba | CRITICAL (el refuter no pudo refutarlo) | Script `prepare` en el `package.json` raíz que construye el paquete; verificado borrando `dist/` y reinstalando desde cero |
 | Al agotarse los reintentos de pg-boss el documento quedaba en `PROCESSING` para siempre y sin evento SSE | CRITICAL | `FailDocumentUseCase` + detección del último intento en `IndexDocumentWorker` (`job.retryCount >= retryLimit`); re-revisado y verificado con prueba unitaria del worker |
 | multer decodificaba los nombres de archivo como latin1 ("Guía técnica.txt" llegaba con mojibake) | Defecto funcional | `defParamCharset: 'utf8'` en `FilesInterceptor` (`documents.controller.ts`) |
+| Iteración 2: la regla de duplicado comparaba contra **cualquier** versión con el mismo hash (`findByKeyAndHash`), así que un documento cuya indexación terminó en `ERROR` no podía volver a subirse con los mismos bytes: el reintento se reportaba como duplicado de la fila fallida | CRITICAL (el refuter no pudo refutarlo) | La regla pasó a consultar solo la última versión vigente (`findLatestByKey`) y a excluir `ERROR`; los bytes de una versión antigua se tratan como rollback. Corregido con TDD (4 specs nuevos en `upload-documents.use-case.spec.ts` y una prueba de integración sobre el repositorio real); re-revisión acotada del fix. Commit `f94e5b4` |
 
 ### 4.3 Errores e incidentes de la IA (divulgación)
 
@@ -167,7 +169,38 @@ Correcciones que surgieron de la revisión independiente, no del agente que escr
   Vitest), incompatible con la decisión Jest + ts-jest; se fijaron NestJS 11.x y TypeScript
   5.9 de forma explícita en lugar de reabrir la decisión de pruebas.
 
-### 4.4 Qué no validó la IA
+### 4.4 Iteración 2 — versionado por contenido
+
+Después de la entrega inicial, el candidato revisó la aplicación y propuso cuatro mejoras:
+versionado por contenido, metadatos reales desde PDF/front matter, atomicidad carga + cola con
+barrido de filas estancadas, y chunking de documentos grandes. Qué ocurrió, y quién hizo qué:
+
+- **Decisión del candidato.** Implementar solo el versionado, con alcance mínimo y sin tocar lo
+  que ya funcionaba; las otras tres quedaron como roadmap justificado (sección 9.1 de
+  `architecture.md`) por decisión de plazo, no por descarte técnico. Los puntos 2 a 4 se
+  planificaron con opción recomendada, alternativa descartada, pruebas y esfuerzo, para que la
+  decisión de posponerlos sea defendible.
+- **Corrección conceptual de la IA.** La propuesta inicial del candidato era "mismo contenido →
+  nueva versión patch". La IA argumentó en contra: un patch sin cambio de bytes es un número sin
+  significado y rompe la idempotencia de la carga masiva; el duplicado debe ser una respuesta
+  informativa (`duplicateOf`), no una versión ni un error. También separó identidad de huella
+  (el hash identifica bytes, no obras; la identidad debe salir de título + autor normalizados) y
+  propuso calcular la huella sobre los bytes en el 202, porque el texto extraído solo existe
+  después, en el worker. El candidato aceptó las tres precisiones.
+- **Revisión independiente.** Un reviewer con lente de fiabilidad detectó que la primera
+  implementación del duplicado bloqueaba el reintento después de un `ERROR` (tabla de 4.2). El
+  refuter no logró refutarlo; se corrigió con TDD y se re-revisó el diff del fix. De esa
+  revisión salió también la regla de rollback (bytes de una versión antigua = nueva versión).
+- **Semver tolerante.** El kata exige `version` como texto libre; la IA propuso y el candidato
+  aceptó una interpretación tolerante (`v` inicial, núcleo de 1 a 3 componentes, prerelease) en
+  la que lo no interpretable nunca rompe la carga, y una versión efectiva que nunca retrocede.
+- **Validación.** Sesión orquestadora: re-ejecutó `pnpm test`, `pnpm lint` y la suite de
+  integración (incluida la nueva `documents-versioning.integration-spec.ts`), y comprobó contra
+  el stack Docker la secuencia duplicado → nueva versión → desaparición de la anterior en
+  `/search` y aparición en "Versiones" del visor. Candidato: tomó las decisiones de alcance y
+  semántica; el recorrido manual final sigue siendo suyo (sección 5).
+
+### 4.5 Qué no validó la IA
 
 La IA no asistió a la sustentación ni validó el guion de la demo; tampoco ejecutó el recorrido
 final en una máquina distinta a la del desarrollo. Esa validación es del candidato (sección 5).
@@ -207,4 +240,9 @@ se dejan vacías a propósito: solo se marcan tras ejecutar cada paso.
 - [ ] Ejecutar `pnpm test` y `pnpm --filter backend test:integration`; anotar los totales.
 - [ ] Desconectar la red o reiniciar el backend con un documento en proceso y verificar la
       reconexión de `EventSource` y el replay por `Last-Event-ID`.
+- [ ] Subir `docs/samples/sample-spec.txt` dos veces con los mismos metadatos: el segundo ítem
+      debe aparecer como "Duplicado" sin crear documento. Editar una línea del archivo y subirlo
+      con el mismo título y autor: nueva versión con bump automático, la anterior desaparece de
+      la búsqueda y aparece en "Versiones" del visor con el aviso "Existe una versión más
+      reciente".
 - [ ] Repasar el checklist del evaluador del PDF ítem por ítem.

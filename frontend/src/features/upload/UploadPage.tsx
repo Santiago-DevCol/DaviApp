@@ -1,4 +1,9 @@
-import { ALLOWED_EXTENSIONS, MAX_FILE_SIZE_BYTES, type DocumentMetadataInput } from '@techdocs/shared';
+import {
+  ALLOWED_EXTENSIONS,
+  MAX_FILE_SIZE_BYTES,
+  type DocumentMetadataInput,
+  type UploadAcceptedItem,
+} from '@techdocs/shared';
 import { useCallback, useMemo, useState } from 'react';
 import { describeError } from '@/api/client';
 import { FileDropzone } from '@/components/organisms/FileDropzone';
@@ -29,6 +34,23 @@ interface PendingFile {
 
 let nextKey = 0;
 
+/** Toast copy for a 202: distinguishes new documents from uploads that already existed. */
+export function summarizeAccepted(items: UploadAcceptedItem[]): { title: string; description: string } {
+  const duplicates = items.filter((item) => item.duplicateOf).length;
+  const accepted = items.length - duplicates;
+  const existed = duplicates === 1 ? '1 archivo ya existía' : `${duplicates} archivos ya existían`;
+  if (accepted === 0) {
+    return {
+      title: existed,
+      description: 'No se creó ninguna versión nueva; puedes abrir los documentos existentes desde la lista.',
+    };
+  }
+  return {
+    title: `${accepted} ${accepted === 1 ? 'documento aceptado' : 'documentos aceptados'}`,
+    description: `La indexación continúa en segundo plano.${duplicates > 0 ? ` ${existed}.` : ''}`,
+  };
+}
+
 function createPending(file: File, defaults: Partial<DocumentMetadataInput>): PendingFile {
   return {
     key: `${Date.now()}-${nextKey++}`,
@@ -53,18 +75,11 @@ export function UploadPage() {
   const tracked = useTrackedUploads();
   const upload = useUploadDocuments({
     onAccepted: (response, input) => {
-      tracked.track(
-        response.items,
-        input.metadata.map((metadata) => metadata.title),
-      );
+      tracked.track(response.items, input.metadata);
       setPending([]);
       setOmitted(0);
       setShowErrors(false);
-      push({
-        tone: 'info',
-        title: `${response.items.length} ${response.items.length === 1 ? 'documento aceptado' : 'documentos aceptados'}`,
-        description: 'La indexación continúa en segundo plano.',
-      });
+      push({ tone: 'info', ...summarizeAccepted(response.items) });
     },
   });
 

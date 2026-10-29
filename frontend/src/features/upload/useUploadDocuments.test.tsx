@@ -31,11 +31,7 @@ function textFile(name: string, content = 'hola'): File {
 function useUploadHarness() {
   const tracked = useTrackedUploads();
   const upload = useUploadDocuments({
-    onAccepted: (response, input) =>
-      tracked.track(
-        response.items,
-        input.metadata.map((metadata) => metadata.title),
-      ),
+    onAccepted: (response, input) => tracked.track(response.items, input.metadata),
   });
   return { tracked, upload };
 }
@@ -123,5 +119,49 @@ describe('useUploadDocuments + useTrackedUploads', () => {
     expect(files.map((file) => file.name)).toEqual(['uno.txt', 'dos.md']);
     expect(JSON.parse(String(form!.get('metadata')))).toEqual([METADATA, second]);
     expect(result.current.tracked.entries.map((entry) => entry.title)).toEqual(['Notas de prueba', 'Segundo']);
+  });
+
+  it('keeps the sent and assigned versions and does not seed or poll duplicates', async () => {
+    server.use(
+      http.post('*/api/documents', () =>
+        HttpResponse.json(
+          {
+            items: [
+              { id: 'bumped', status: DocumentStatus.PROCESSING, fileName: 'uno.txt', version: '1.0.1' },
+              {
+                id: PROCESSING_DOC.id,
+                status: DocumentStatus.PROCESSING,
+                fileName: 'dos.txt',
+                version: '1.0.0',
+                duplicateOf: { id: PROCESSING_DOC.id, version: '1.0.0' },
+              },
+            ],
+          },
+          { status: 202 },
+        ),
+      ),
+    );
+    const { client, result } = setup();
+
+    act(() =>
+      result.current.upload.mutate({
+        files: [textFile('uno.txt'), textFile('dos.txt')],
+        metadata: [METADATA, { ...METADATA, title: 'Segundo' }],
+      }),
+    );
+    await waitFor(() => expect(result.current.upload.isSuccess).toBe(true));
+
+    const [bumped, duplicate] = result.current.tracked.entries;
+    expect(bumped).toMatchObject({ id: 'bumped', sentVersion: '1.0.0', version: '1.0.1' });
+    expect(duplicate).toMatchObject({ id: PROCESSING_DOC.id, duplicateOf: { id: PROCESSING_DOC.id, version: '1.0.0' } });
+    expect(JSON.parse(window.sessionStorage.getItem(TRACKED_UPLOADS_KEY) ?? '[]')[1]).toMatchObject({
+      duplicateOf: { id: PROCESSING_DOC.id, version: '1.0.0' },
+    });
+
+    // The duplicate is the existing document: nothing is seeded for it and it is not polled.
+    expect(client.getQueryData<DocumentDetail>(queryKeys.document('bumped'))?.status).toBe(DocumentStatus.PROCESSING);
+    const query = client.getQueryCache().find({ queryKey: queryKeys.document(PROCESSING_DOC.id) });
+    const interval = query?.observers[0]?.options.refetchInterval;
+    expect(interval).toBe(false);
   });
 });

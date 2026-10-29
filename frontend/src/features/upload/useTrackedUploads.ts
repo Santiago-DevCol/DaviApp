@@ -1,5 +1,10 @@
 import { useQueries } from '@tanstack/react-query';
-import { DocumentStatus, type DocumentDetail, type UploadAcceptedItem } from '@techdocs/shared';
+import {
+  DocumentStatus,
+  type DocumentDetail,
+  type DocumentMetadataInput,
+  type UploadAcceptedItem,
+} from '@techdocs/shared';
 import { useCallback, useState } from 'react';
 import { getDocument } from '@/api/documents.api';
 import { processingPollInterval } from '@/lib/polling';
@@ -13,7 +18,16 @@ export interface TrackedUpload {
   fileName: string;
   title: string;
   acceptedAt: string;
+  /** Version the user typed in the form (absent in entries stored before versioning). */
+  sentVersion?: string;
+  /** Version the backend assigned; may differ from `sentVersion` when it was auto-bumped. */
+  version?: string;
+  /** Set when the upload matched an existing document byte for byte; `id` is that document's. */
+  duplicateOf?: { id: string; version: string };
 }
+
+/** Fields the user sent for each accepted file, in the same order as the 202 items. */
+export type SentMetadata = Pick<DocumentMetadataInput, 'title' | 'version'>;
 
 export interface TrackedUploadView extends TrackedUpload {
   status: DocumentStatus | null;
@@ -61,14 +75,21 @@ export function useTrackedUploads() {
   }, []);
 
   const track = useCallback(
-    (items: UploadAcceptedItem[], titles: string[]) => {
+    (items: UploadAcceptedItem[], sent: SentMetadata[]) => {
       const acceptedAt = new Date().toISOString();
-      const added = items.map((item, index) => ({
-        id: item.id,
-        fileName: item.fileName,
-        title: titles[index] ?? item.fileName,
-        acceptedAt,
-      }));
+      const added = items.map((item, index): TrackedUpload => {
+        const entry: TrackedUpload = {
+          id: item.id,
+          fileName: item.fileName,
+          title: sent[index]?.title ?? item.fileName,
+          acceptedAt,
+        };
+        const sentVersion = sent[index]?.version;
+        if (sentVersion) entry.sentVersion = sentVersion;
+        if (item.version) entry.version = item.version;
+        if (item.duplicateOf) entry.duplicateOf = item.duplicateOf;
+        return entry;
+      });
       const known = new Set(added.map((entry) => entry.id));
       persist([...added, ...entries.filter((entry) => !known.has(entry.id))].slice(0, MAX_TRACKED));
     },
@@ -88,7 +109,9 @@ export function useTrackedUploads() {
       queryFn: ({ signal }: { signal: AbortSignal }) => getDocument(entry.id, signal),
       staleTime: Infinity,
       refetchOnMount: true,
-      refetchInterval: processingPollInterval,
+      // A duplicate row points at a document that already existed; its status
+      // is informational, so it is never polled.
+      refetchInterval: entry.duplicateOf ? false : processingPollInterval,
     })),
   });
 

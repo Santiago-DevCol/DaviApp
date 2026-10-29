@@ -15,6 +15,13 @@
       "when": 1793212531080,
       "tag": "0001_document_file_name",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793247772308,
+      "tag": "0002_document_versioning",
+      "breakpoints": true
     }
   ]
 }

@@ -29,42 +29,80 @@ export function TrackedUploadsList({ entries, onRemove, onClear }: TrackedUpload
         </Button>
       </div>
       <ul className="border-t border-line">
-        {entries.map((entry) => (
-          <li
-            key={entry.id}
-            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-line py-3 md:grid-cols-[minmax(0,1fr)_140px_150px_44px]"
-          >
-            <div className="min-w-0">
-              <p className="truncate font-bold text-ink" title={entry.title}>
-                {entry.title}
-              </p>
-              <p className="truncate text-[13px] text-ink-label">{entry.fileName}</p>
-            </div>
-
-            {entry.status ? (
-              <StatusDot status={entry.status} />
-            ) : entry.loadError ? (
-              <StatusDot tone="neutral" label="Desconocido" />
-            ) : (
-              <Spinner size="sm" label="Consultando estado" />
-            )}
-
-            <RowDetail entry={entry} />
-
-            <button
-              type="button"
-              onClick={() => onRemove(entry.id)}
-              aria-label={`Dejar de seguir ${entry.fileName}`}
-              className="col-start-2 row-start-1 grid h-11 w-11 place-items-center rounded-lg text-ink-soft hover:bg-raised focus-ring md:col-start-4"
-            >
-              <span aria-hidden="true" className="text-lg leading-none">
-                &times;
-              </span>
-            </button>
-          </li>
-        ))}
+        {entries.map((entry) =>
+          entry.duplicateOf ? (
+            <DuplicateRow key={entry.id} entry={entry} duplicateOf={entry.duplicateOf} onRemove={onRemove} />
+          ) : (
+            <UploadRow key={entry.id} entry={entry} onRemove={onRemove} />
+          ),
+        )}
       </ul>
     </section>
+  );
+}
+
+const ROW_CLASS =
+  'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-line py-3 md:grid-cols-[minmax(0,1fr)_140px_150px_44px]';
+const LINK_CLASS = 'w-fit rounded-sm text-[13px] text-accent hover:underline focus-ring';
+
+interface RowProps {
+  entry: TrackedUploadView;
+  onRemove: (id: string) => void;
+}
+
+/** A tracked upload with a live status; the version note appears only when the backend bumped it. */
+function UploadRow({ entry, onRemove }: RowProps) {
+  const bumped = entry.version && entry.sentVersion && entry.version !== entry.sentVersion;
+  return (
+    <li className={ROW_CLASS}>
+      <div className="min-w-0">
+        <p className="truncate font-bold text-ink" title={entry.title}>
+          {entry.title}
+        </p>
+        <p className="truncate text-[13px] text-ink-label">{entry.fileName}</p>
+        {bumped && (
+          <p className="mt-1 text-[13px] text-ink-soft">
+            Versión asignada: v{entry.version}{' '}
+            <span className="text-ink-label">(enviada v{entry.sentVersion})</span>
+          </p>
+        )}
+      </div>
+
+      {entry.status ? (
+        <StatusDot status={entry.status} />
+      ) : entry.loadError ? (
+        <StatusDot tone="neutral" label="Desconocido" />
+      ) : (
+        <Spinner size="sm" label="Consultando estado" />
+      )}
+
+      <RowDetail entry={entry} />
+
+      <RemoveButton entry={entry} onRemove={onRemove} />
+    </li>
+  );
+}
+
+/** An upload whose bytes already existed: nothing was created, so there is no status to follow. */
+function DuplicateRow({ entry, duplicateOf, onRemove }: RowProps & { duplicateOf: { id: string; version: string } }) {
+  return (
+    <li className={ROW_CLASS}>
+      <div className="min-w-0">
+        <p className="truncate font-bold text-ink" title={entry.title}>
+          {entry.title}
+        </p>
+        <p className="truncate text-[13px] text-ink-label">{entry.fileName}</p>
+        <p className="mt-1 text-[13px] text-ink-soft">Ya existía como versión {duplicateOf.version}</p>
+      </div>
+
+      <StatusDot tone="neutral" label="Duplicado" />
+
+      <Link to={`/documents/${duplicateOf.id}`} className={LINK_CLASS}>
+        Ver documento
+      </Link>
+
+      <RemoveButton entry={entry} onRemove={onRemove} />
+    </li>
   );
 }
 
@@ -72,7 +110,7 @@ export function TrackedUploadsList({ entries, onRemove, onClear }: TrackedUpload
 function RowDetail({ entry }: { entry: TrackedUploadView }) {
   if (entry.status === DocumentStatus.INDEXED) {
     return (
-      <Link to={`/documents/${entry.id}`} className="w-fit rounded-sm text-[13px] text-accent hover:underline focus-ring">
+      <Link to={`/documents/${entry.id}`} className={LINK_CLASS}>
         Ver documento
       </Link>
     );
@@ -86,4 +124,19 @@ function RowDetail({ entry }: { entry: TrackedUploadView }) {
     return <p className={`${note} text-ink-label`}>No se pudo consultar el estado: {entry.loadError}</p>;
   }
   return null;
+}
+
+function RemoveButton({ entry, onRemove }: RowProps) {
+  return (
+    <button
+      type="button"
+      onClick={() => onRemove(entry.id)}
+      aria-label={`Dejar de seguir ${entry.fileName}`}
+      className="col-start-2 row-start-1 grid h-11 w-11 place-items-center rounded-lg text-ink-soft hover:bg-raised focus-ring md:col-start-4"
+    >
+      <span aria-hidden="true" className="text-lg leading-none">
+        &times;
+      </span>
+    </button>
+  );
 }

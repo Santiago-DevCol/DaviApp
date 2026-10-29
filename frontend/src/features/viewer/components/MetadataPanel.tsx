@@ -1,4 +1,5 @@
 import type { DocumentDetail } from '@techdocs/shared';
+import { Link } from 'react-router-dom';
 import { StatusDot, Tag } from '@/components/atoms';
 import { formatBytes, formatDateTime } from '@/lib/format';
 
@@ -16,6 +17,9 @@ export function MetadataPanel({ document }: MetadataPanelProps) {
     ['Creado', formatDateTime(document.createdAt)],
     ['Actualizado', formatDateTime(document.updatedAt)],
   ];
+  // The hash identifies the exact bytes; 12 hex chars are enough to tell versions apart by eye.
+  if (document.contentHash) rows.push(['Huella', document.contentHash.slice(0, 12)]);
+  const versions = document.versions ?? [];
 
   return (
     <aside aria-label="Metadatos" className="flex flex-col gap-5">
@@ -45,6 +49,37 @@ export function MetadataPanel({ document }: MetadataPanelProps) {
           </dd>
         </div>
       </dl>
+      {versions.length > 0 && (
+        <section aria-labelledby="document-versions-title" className="border-t border-line pt-5">
+          <h3 id="document-versions-title" className="text-xs uppercase tracking-wide text-ink-label">
+            Versiones
+          </h3>
+          <ul aria-label="Versiones" className="mt-2 flex flex-col gap-1.5">
+            {versions.map((entry) => {
+              const current = entry.id === document.id;
+              return (
+                <li key={entry.id} className="flex flex-wrap items-center gap-2 text-[15px]">
+                  {current ? (
+                    <span className="font-bold text-ink" aria-current="true">
+                      v{entry.version}
+                    </span>
+                  ) : (
+                    <Link
+                      to={`/documents/${entry.id}`}
+                      className="rounded-sm font-bold text-accent hover:underline focus-ring"
+                    >
+                      v{entry.version}
+                    </Link>
+                  )}
+                  <StatusDot status={entry.status} />
+                  <span className="text-xs text-ink-label">{formatDateTime(entry.createdAt)}</span>
+                  {current && <span className="text-xs text-ink-label">(actual)</span>}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
     </aside>
   );
 }

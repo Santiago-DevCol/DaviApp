@@ -18,7 +18,7 @@ export class InMemoryDocumentRepository implements DocumentRepository {
 
   async findById(id: string): Promise<Document | null> {
     const row = this.rows.get(id);
-    return row ? new Document({ ...row, tags: [...row.tags] }) : null;
+    return row ? hydrate(row) : null;
   }
 
   async update(document: Document): Promise<void> {
@@ -33,6 +33,29 @@ export class InMemoryDocumentRepository implements DocumentRepository {
     this.rows.set(document.id, snapshot(document));
   }
 
+  async findByKeyAndHash(documentKey: string, contentHash: string): Promise<Document | null> {
+    const row = [...this.rows.values()].find(
+      (candidate) => candidate.documentKey === documentKey && candidate.contentHash === contentHash,
+    );
+    return row ? hydrate(row) : null;
+  }
+
+  async findLatestByKey(documentKey: string): Promise<Document | null> {
+    const row = this.versionsOf(documentKey).find((candidate) => candidate.isLatest);
+    return row ? hydrate(row) : null;
+  }
+
+  async listVersionsByKey(documentKey: string): Promise<Document[]> {
+    return this.versionsOf(documentKey).map(hydrate);
+  }
+
+  /** Newest first, with id DESC as a deterministic tiebreaker like the SQL adapter. */
+  private versionsOf(documentKey: string): DocumentProps[] {
+    return [...this.rows.values()]
+      .filter((row) => row.documentKey === documentKey)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));
+  }
+
   /** Test helpers. */
   seed(document: Document): void {
     this.rows.set(document.id, snapshot(document));
@@ -40,7 +63,7 @@ export class InMemoryDocumentRepository implements DocumentRepository {
 
   get(id: string): Document | undefined {
     const row = this.rows.get(id);
-    return row ? new Document({ ...row, tags: [...row.tags] }) : undefined;
+    return row ? hydrate(row) : undefined;
   }
 
   count(): number {
@@ -52,6 +75,10 @@ export class InMemoryDocumentRepository implements DocumentRepository {
   }
 }
 
+function hydrate(row: DocumentProps): Document {
+  return new Document({ ...row, tags: [...row.tags] });
+}
+
 function snapshot(document: Document): DocumentProps {
   return {
     id: document.id,
@@ -61,6 +88,9 @@ function snapshot(document: Document): DocumentProps {
     category: document.category,
     tags: [...document.tags],
     version: document.version,
+    documentKey: document.documentKey,
+    contentHash: document.contentHash,
+    isLatest: document.isLatest,
     format: document.format,
     storageKey: document.storageKey,
     sizeBytes: document.sizeBytes,

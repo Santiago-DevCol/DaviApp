@@ -2,7 +2,7 @@ import { DocumentStatus } from '@techdocs/shared';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { MockEventSource } from '@/test/mockEventSource';
-import { INDEXED_DOC, PROCESSING_DOC, setDocument } from '@/test/msw/handlers';
+import { INDEXED_DOC, OLD_VERSION_DOC, PROCESSING_DOC, setDocument } from '@/test/msw/handlers';
 import { renderWithProviders } from '@/test/render';
 import { DocumentPage } from './DocumentPage';
 
@@ -51,7 +51,7 @@ describe('DocumentPage', () => {
     expect(screen.getByText('kubectl apply')).toBeInTheDocument();
     expect(screen.getByText('Paso uno').closest('ul')).not.toBeNull();
     expect(screen.getByText('Equipo Plataforma')).toBeInTheDocument();
-    expect(screen.getByText('Indexado')).toBeInTheDocument();
+    expect(screen.getAllByText('Indexado').length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: /Volver a resultados/ })).toHaveAttribute('href', '/search');
     // Keep the per-test timeout above the 5 s wait for the lazy chunk; Vitest defaults to 5 s.
   }, 10_000);
@@ -64,7 +64,7 @@ describe('DocumentPage', () => {
     });
 
     expect(await screen.findByText('El documento se está procesando')).toBeInTheDocument();
-    expect(screen.getByText('Procesando')).toBeInTheDocument();
+    expect(screen.getAllByText('Procesando').length).toBeGreaterThan(0);
 
     // The backend finishes indexing: the detail now has content, and the event arrives.
     setDocument({ ...PROCESSING_DOC, status: DocumentStatus.INDEXED, content: 'Texto indexado del documento.' });
@@ -78,7 +78,7 @@ describe('DocumentPage', () => {
 
     expect(await screen.findByText('Texto indexado del documento.')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText('El documento se está procesando')).toBeNull());
-    expect(screen.getByText('Indexado')).toBeInTheDocument();
+    expect(screen.getAllByText('Indexado').length).toBeGreaterThan(0);
     // The toast viewport is rendered by the shell; here only the cache-driven UI is asserted.
   });
 
@@ -89,6 +89,31 @@ describe('DocumentPage', () => {
       path: '/documents/:id',
     });
     expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo extraer texto');
+  });
+
+  it('flags an outdated version and links to the latest one', async () => {
+    renderWithProviders(<DocumentPage />, {
+      route: `/documents/${OLD_VERSION_DOC.id}`,
+      path: '/documents/:id',
+    });
+
+    await screen.findByRole('heading', { level: 1, name: OLD_VERSION_DOC.title });
+    const banner = screen.getByText('Existe una versión más reciente').closest('div');
+    expect(banner).not.toBeNull();
+    expect(within(banner!).getByRole('link', { name: /v2\.1\.0/ })).toHaveAttribute(
+      'href',
+      `/documents/${INDEXED_DOC.id}`,
+    );
+  });
+
+  it('does not show the outdated banner on the latest version', async () => {
+    renderWithProviders(<DocumentPage />, {
+      route: `/documents/${INDEXED_DOC.id}`,
+      path: '/documents/:id',
+    });
+
+    await screen.findByRole('heading', { level: 1, name: INDEXED_DOC.title });
+    expect(screen.queryByText('Existe una versión más reciente')).toBeNull();
   });
 
   it('shows a not-found state for unknown ids', async () => {

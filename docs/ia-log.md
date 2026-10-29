@@ -110,6 +110,48 @@ Format per entry: stage, tool, what was asked, what came back, human validation 
   `.dockerignore` excluded the `infrastructure/storage` source folder; `expires` + `add_header`
   produced a duplicate `Cache-Control`.
 
+## 2026-10-28 — Iteration 2: content versioning (one backend writer, one frontend writer, review + refutation)
+
+- **Trigger**: after the initial delivery the candidate reviewed the app and proposed four
+  improvements: content versioning, real metadata from PDF/front matter, upload + queue atomicity
+  with a stale-row sweeper, and chunking for large documents.
+- **Candidate decision**: implement only versioning, minimal scope, nothing that already works
+  gets touched; points 2-4 go to a justified roadmap in `architecture.md` (section 9.1) because
+  of the deadline (Thursday 29 Oct, 11:30), not because they were rejected technically.
+- **Conceptual correction by the AI** (accepted by the candidate): the first idea was "same
+  content -> automatic patch version". The AI argued against it: a patch with no byte change is a
+  meaningless number and breaks the idempotency of bulk uploads; a duplicate must be an
+  informative answer (`duplicateOf`), not a version nor an error. It also separated identity from
+  fingerprint (identity = normalized title + author in `document_key`; fingerprint = SHA-256 of
+  the uploaded bytes in `content_hash`) and chose bytes over extracted text because the 202 is
+  immediate and the text only exists later in the worker.
+- **What came back**: migration `0002` (columns, SQL backfill with `unaccent` matching
+  `buildDocumentKey`, partial index on `(document_key) WHERE is_latest` and composite
+  `(document_key, content_hash)`), domain helpers `document-key.ts` and `semver.ts`, upload rules
+  in `UploadDocumentsUseCase`, `is_latest` filter in the search CTE and in `countMatches`,
+  `versions` in `DocumentDetail`, duplicate badge and assigned version in the tracked list,
+  version history and outdated banner in the viewer, `documents-versioning.integration-spec.ts`.
+- **Independent review (reliability lens)**: CRITICAL — the duplicate rule compared against any
+  version with the same hash (`findByKeyAndHash`), so a document whose indexing ended in `ERROR`
+  could not be re-uploaded with the same bytes; the retry was reported as a duplicate of the
+  failed row. The refuter could not refute it. Fixed with TDD (4 new unit specs + 1 integration
+  test through the real repository): the rule now consults only the current latest version and
+  excludes `ERROR`; bytes of an older superseded version count as a rollback (commit `f94e5b4`).
+  Scoped re-review of the fix diff.
+- **Tolerant semver**: the kata's `version` is free text; the AI proposed and the candidate
+  accepted a tolerant parser (leading `v`, 1-3 numeric components, prerelease) where unparsable
+  input never breaks the upload, plus an effective version that never goes backwards
+  (`max(sent, bumpPatch(latest))`, commit `eba548c`).
+- **Verification by the orchestrator session**: `pnpm test`, `pnpm lint` and
+  `pnpm --filter backend test:integration` re-run; duplicate -> new version -> previous version
+  gone from `/search` and listed under "Versiones" in the viewer reproduced against the Docker
+  stack. Totals after the iteration: backend 163 unit/e2e tests in 21 suites, 16 integration
+  tests in 2 suites; frontend 54 tests in 12 files.
+- **Known limits accepted and documented** (`architecture.md` 6b.5): `unaccent` vs NFD for
+  `ø`/`ß`/`æ` in the backfill only; pre-migration rows keep an empty `content_hash`; two
+  concurrent uploads of the same identity are not serialized (advisory lock in the roadmap);
+  orphan file if the process dies between `storage.save` and the insert.
+
 ## 2026-10-28 — Phase 8: visual redesign (Claude Design + Claude Code writers)
 
 - **Tool**: Claude Design (the design-canvas artifact type inside the Claude desktop app, Code
@@ -169,3 +211,23 @@ Format per entry: stage, tool, what was asked, what came back, human validation 
   info, not fixed: inline SVG icon props duplicated across three files, the two-way coupling
   between `app/layout` and `features/viewer` for the outline, a comment claiming a single
   `extractHeadings` pass, and the first-paint theme script being only string-checked by tests.
+
+## 2026-10-29 — Merge: visual redesign into main after Iteration 2
+
+- **What happened**: `feat/calm-ui` (Phase 8) was merged with `origin/main` after the content
+  versioning iteration had landed there. Eight files conflicted (three docs, the tracked-uploads
+  list and its test, the document page and its test, the metadata panel).
+- **Resolution rule**: main's behaviour, data flow, props, strings and tests win; the token-based
+  visual system wins everywhere. The tracked-uploads hairline grid gained the duplicate row
+  (`StatusDot` neutral "Duplicado" plus "Ya existía como versión x") and the assigned-version
+  note; the boxless metadata aside gained the "Versiones" list with a `StatusDot` per version;
+  `OutdatedVersionBanner` (new on main) was ported from the amber box to `border-line` /
+  `bg-surface` with the title in `text-busy`. Main's tests asserting uppercase status labels
+  ("INDEXADO", "PROCESANDO") were switched to the sentence-case words; the two
+  `TrackedUploadsList` suites were merged into one file. No stock-palette class is left under
+  `frontend/src`.
+- **Verification**: `tsc --noEmit` clean, `vite build` OK, backend `Test Suites: 21 passed` /
+  `Tests: 163 passed`; frontend `Test Files  20 passed (20)` / `Tests  108 passed (108)`.
+  Observed once: when the frontend and backend suites run concurrently on the same machine,
+  the `DocumentPage` tests that wait up to 5 s for the lazy Markdown chunk can time out; alone
+  the suite is green.

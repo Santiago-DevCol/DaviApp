@@ -1,8 +1,9 @@
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { DocumentStatus } from '@techdocs/shared';
 import { describe, expect, it } from 'vitest';
 import { renderWithProviders } from '@/test/render';
-import { UploadPage } from './UploadPage';
+import { UploadPage, summarizeAccepted } from './UploadPage';
 import { MAX_FILES_PER_UPLOAD } from './validation';
 
 function textFiles(count: number, prefix = 'doc'): File[] {
@@ -40,5 +41,20 @@ describe('UploadPage', () => {
     await user.upload(input, textFiles(1, 'fits'));
     expect(screen.queryByText(/Se omiti/)).toBeNull();
     expect(screen.getByText('fits-1.txt')).toBeInTheDocument();
+  });
+
+  it('summarizes a batch made only of duplicates as already existing', () => {
+    const duplicate = {
+      id: 'x',
+      status: DocumentStatus.INDEXED,
+      fileName: 'a.txt',
+      duplicateOf: { id: 'x', version: '1.0.0' },
+    };
+    expect(summarizeAccepted([duplicate, { ...duplicate, fileName: 'b.txt' }]).title).toBe('2 archivos ya existían');
+    expect(summarizeAccepted([duplicate]).title).toBe('1 archivo ya existía');
+    expect(summarizeAccepted([duplicate, { id: 'y', status: DocumentStatus.PROCESSING, fileName: 'c.txt' }])).toEqual({
+      title: '1 documento aceptado',
+      description: 'La indexación continúa en segundo plano. 1 archivo ya existía.',
+    });
   });
 });

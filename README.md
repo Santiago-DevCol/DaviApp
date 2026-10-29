@@ -71,7 +71,7 @@ Base URL: `http://localhost:3000` (direct) or `http://localhost:8080/api` (throu
 | ------ | ---------------- | ------------------------------------------------------------- |
 | POST   | `/documents`     | Upload 1-20 files with metadata; returns `202 Accepted`       |
 | GET    | `/documents/:id` | Metadata, status and extracted text of one document           |
-| GET    | `/search`        | Full-text search with pagination and highlights               |
+| GET    | `/search`        | Full-text search (latest versions only) with pagination and highlights |
 | GET    | `/events`        | SSE stream of document status changes                         |
 | GET    | `/health`        | `200 {status:"ok"}` or `503 {status:"degraded"}` if the DB is down |
 
@@ -85,16 +85,37 @@ array aligned by index with the files (`title`, `author`, `category`, `tags[]`,
 curl -F files=@docs/samples/sample-manual.md \
      -F 'metadata=[{"title":"Manual","author":"QA","category":"manuals","tags":["demo"],"version":"1.0.0"}]' \
      http://localhost:8080/api/documents
-# 202 {"items":[{"id":"<uuid>","status":"PROCESSING","fileName":"sample-manual.md"}]}
+# 202 {"items":[{"id":"<uuid>","status":"PROCESSING","fileName":"sample-manual.md","version":"1.0.0"}]}
 ```
 
 The document is stored as `PROCESSING`; a queue worker extracts the text and
 moves it to `INDEXED` (or `ERROR` with `errorMessage`, e.g. a PDF without text).
+Each item carries the effective `version` (the one sent, or an automatic patch
+bump) and, when nothing was created because the same bytes already exist,
+`duplicateOf: { id, version }` pointing at the existing document.
+
+### Versioning
+
+Documents are grouped by identity (`documentKey` = normalized title + author)
+and fingerprinted by the SHA-256 of the uploaded bytes (`contentHash`). Three
+rules apply per uploaded file:
+
+1. Same identity and same bytes as the current latest version (unless it is in
+   `ERROR`): duplicate, nothing is created, the item reports `duplicateOf`.
+2. Same identity, different bytes (or same bytes after an `ERROR`, or the bytes
+   of an older version): new version. The effective version is the one sent if
+   it is at least a patch above the latest, otherwise `bumpPatch(latest)`; it
+   never goes backwards. The previous version keeps being readable but leaves
+   search (`isLatest = false`).
+3. New identity: new document.
 
 ### GET /documents/:id
 
 Returns `DocumentDetail`: metadata, `format`, `fileName`, `sizeBytes`, `status`,
-`errorMessage`, `content` (extracted text, `null` until indexed), timestamps.
+`errorMessage`, `content` (extracted text, `null` until indexed), timestamps,
+plus `documentKey`, `isLatest`, `contentHash` and `versions` (every version of
+the same identity, newest first: `{ id, version, status, isLatest, createdAt }`).
+Superseded versions stay readable here even though they are hidden from search.
 `404` for unknown ids, `400` for a malformed UUID.
 
 ### GET /search
@@ -107,6 +128,8 @@ Query parameters: `q` (required, 1-200 chars), `page` (default 1),
   "total": 42, "page": 1, "pageSize": 10, "tookMs": 3.1 }
 ```
 
+Only the latest version of each document identity is returned (`is_latest`);
+superseded versions remain available through `GET /documents/:id`.
 `tookMs` times the search engine call only; the `X-Response-Time` header covers
 the whole handler (validation + engine + mapping). Results are never cached (`Cache-Control: no-store`).
 

@@ -15,6 +15,7 @@ function createProcessingDocument(): Document {
     },
     format: 'md',
     sizeBytes: 1234,
+    contentHash: 'f'.repeat(64),
     now: new Date('2026-01-01T00:00:00.000Z'),
   });
 }
@@ -63,6 +64,9 @@ describe('Document', () => {
       category: base.category,
       tags: [...base.tags],
       version: base.version,
+      documentKey: base.documentKey,
+      contentHash: base.contentHash,
+      isLatest: true,
       format: base.format,
       storageKey: base.storageKey,
       sizeBytes: base.sizeBytes,
@@ -96,5 +100,27 @@ describe('Document', () => {
 
     document.markIndexed('done');
     expect(document.isProcessing()).toBe(false);
+  });
+});
+
+describe('Document versioning', () => {
+  it('derives the document key from title and author and starts as the latest version', () => {
+    const document = createProcessingDocument();
+
+    expect(document.documentKey).toBe('crane manual|ana');
+    expect(document.contentHash).toBe('f'.repeat(64));
+    expect(document.isLatest).toBe(true);
+  });
+
+  it('supersede() clears isLatest, bumps updatedAt and leaves the lifecycle state untouched', () => {
+    const document = createProcessingDocument();
+    document.markIndexed('body', new Date('2026-01-01T00:00:05.000Z'));
+
+    document.supersede(new Date('2026-02-01T00:00:00.000Z'));
+
+    expect(document.isLatest).toBe(false);
+    expect(document.status).toBe(DocumentStatus.INDEXED);
+    expect(document.content).toBe('body');
+    expect(document.updatedAt).toEqual(new Date('2026-02-01T00:00:00.000Z'));
   });
 });

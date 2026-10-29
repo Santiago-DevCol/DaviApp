@@ -8,6 +8,7 @@ import { EmptyState, ErrorState } from '@/components/molecules';
 import { formatDateTime } from '@/lib/format';
 import { extractHeadings, type Heading } from '@/lib/markdownOutline';
 import { DocumentBody } from './components/DocumentBody';
+import { OutdatedVersionBanner } from './components/OutdatedVersionBanner';
 import { MetadataPanel } from './components/MetadataPanel';
 import { StatusBanner } from './components/StatusBanner';
 import { useDocument } from './useDocument';
@@ -91,6 +92,7 @@ export function DocumentPage() {
             </header>
 
             <StatusBanner status={data.status} errorMessage={data.errorMessage} />
+            <OutdatedVersionBanner document={data} />
 
             {data.status === DocumentStatus.INDEXED && data.content != null ? (
               <DocumentBody format={data.format} content={data.content} />

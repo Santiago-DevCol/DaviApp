@@ -70,6 +70,31 @@ export interface UploadAcceptedResponse {
   items: UploadAcceptedItem[];
 }
 
+/** Where a suggested metadata value came from. */
+export type MetadataSuggestionSource = 'pdf-info' | 'front-matter' | 'heuristic' | 'none';
+
+export interface MetadataSuggestion {
+  title?: string;
+  author?: string;
+  category?: string;
+  tags?: string[];
+  version?: string;
+}
+
+/** Result of POST /documents/inspect for one uploaded file; nothing is persisted. */
+export interface InspectedFile {
+  fileName: string;
+  format: DocumentFormat;
+  sizeBytes: number;
+  pages?: number;
+  source: MetadataSuggestionSource;
+  suggested: MetadataSuggestion;
+}
+
+export interface InspectResponse {
+  items: InspectedFile[];
+}
+
 export interface SearchResultItem {
   id: string;
   title: string;
