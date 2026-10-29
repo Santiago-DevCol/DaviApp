@@ -1,4 +1,5 @@
 import { DocumentFormat, DocumentMetadataInput, DocumentStatus } from '@techdocs/shared';
+import { buildDocumentKey } from './document-key';
 import { DocumentStateError } from './errors';
 
 export interface DocumentProps {
@@ -9,6 +10,11 @@ export interface DocumentProps {
   category: string;
   tags: string[];
   version: string;
+  /** Normalized title + author; see `buildDocumentKey`. */
+  documentKey: string;
+  /** SHA-256 (hex) of the uploaded bytes. */
+  contentHash: string;
+  isLatest: boolean;
   format: DocumentFormat;
   storageKey: string;
   sizeBytes: number;
@@ -25,6 +31,7 @@ export interface CreateDocumentInput {
   metadata: DocumentMetadataInput;
   format: DocumentFormat;
   sizeBytes: number;
+  contentHash: string;
   now?: Date;
 }
 
@@ -33,6 +40,10 @@ export interface CreateDocumentInput {
  *   PROCESSING -> INDEXED (text extracted and stored)
  *   PROCESSING -> ERROR   (extraction failed, or indexing retries were exhausted)
  * Both end states are terminal.
+ *
+ * Versioning: documents sharing a `documentKey` form a history; exactly one of
+ * them is expected to be `isLatest`. A document is superseded (never deleted)
+ * when a newer version of the same key is accepted.
  */
 export class Document {
   readonly id: string;
@@ -42,6 +53,8 @@ export class Document {
   readonly category: string;
   readonly tags: readonly string[];
   readonly version: string;
+  readonly documentKey: string;
+  readonly contentHash: string;
   readonly format: DocumentFormat;
   readonly storageKey: string;
   readonly sizeBytes: number;
@@ -50,6 +63,7 @@ export class Document {
   private _status: DocumentStatus;
   private _errorMessage: string | null;
   private _content: string | null;
+  private _isLatest: boolean;
   private _updatedAt: Date;
 
   constructor(props: DocumentProps) {
@@ -60,6 +74,8 @@ export class Document {
     this.category = props.category;
     this.tags = [...props.tags];
     this.version = props.version;
+    this.documentKey = props.documentKey;
+    this.contentHash = props.contentHash;
     this.format = props.format;
     this.storageKey = props.storageKey;
     this.sizeBytes = props.sizeBytes;
@@ -67,6 +83,7 @@ export class Document {
     this._status = props.status;
     this._errorMessage = props.errorMessage;
     this._content = props.content;
+    this._isLatest = props.isLatest;
     this._updatedAt = props.updatedAt;
   }
 
@@ -80,6 +97,9 @@ export class Document {
       category: input.metadata.category,
       tags: input.metadata.tags,
       version: input.metadata.version,
+      documentKey: buildDocumentKey(input.metadata.title, input.metadata.author),
+      contentHash: input.contentHash,
+      isLatest: true,
       format: input.format,
       storageKey: Document.storageKeyFor(input.id, input.format),
       sizeBytes: input.sizeBytes,
@@ -109,6 +129,16 @@ export class Document {
 
   get updatedAt(): Date {
     return this._updatedAt;
+  }
+
+  get isLatest(): boolean {
+    return this._isLatest;
+  }
+
+  /** A newer version of the same document key was accepted; this one stays readable but leaves search. */
+  supersede(at: Date = new Date()): void {
+    this._isLatest = false;
+    this._updatedAt = at;
   }
 
   isProcessing(): boolean {

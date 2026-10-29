@@ -7,22 +7,34 @@ export const FIXTURE_IDS = [
   'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
 ] as const;
 
-export function processingDocument(
-  overrides: Partial<{ id: string; fileName: string; format: DocumentFormat }> = {},
-): Document {
+export const FIXTURE_CONTENT_HASH = 'a'.repeat(64);
+
+export interface ProcessingDocumentOverrides {
+  id: string;
+  fileName: string;
+  format: DocumentFormat;
+  title: string;
+  author: string;
+  version: string;
+  contentHash: string;
+  now: Date;
+}
+
+export function processingDocument(overrides: Partial<ProcessingDocumentOverrides> = {}): Document {
   const format = overrides.format ?? 'md';
   return Document.create({
     id: overrides.id ?? FIXTURE_IDS[0],
     fileName: overrides.fileName ?? `manual.${format}`,
     metadata: {
-      title: 'Crane manual',
-      author: 'Ana Torres',
+      title: overrides.title ?? 'Crane manual',
+      author: overrides.author ?? 'Ana Torres',
       category: 'manuals',
       tags: ['crane', 'safety'],
-      version: '1.0.0',
+      version: overrides.version ?? '1.0.0',
     },
     format,
     sizeBytes: 2048,
-    now: new Date('2026-01-01T00:00:00.000Z'),
+    contentHash: overrides.contentHash ?? FIXTURE_CONTENT_HASH,
+    now: overrides.now ?? new Date('2026-01-01T00:00:00.000Z'),
   });
 }
