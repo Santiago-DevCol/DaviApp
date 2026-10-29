@@ -11,6 +11,10 @@ incluye los errores de la IA y los incidentes, no solo los aciertos.
 |---|---|---|
 | Claude Code (aplicación de escritorio de Claude) | Claude Fable 5.1 | Primero en **modo plan** (lectura del PDF, extracción de requisitos, decisiones una a una). Después como **orquestador**: un hilo principal delgado que delegó cada fase a sub-agentes con un brief escrito y sintetizó sus resultados |
 | Claude Design (lienzo de diseño dentro de la aplicación de escritorio de Claude, pestaña Code) | Claude Fable 5.1 | Exploración visual del rediseño del frontend (fase 8) en un lienzo de cinco mesas de trabajo: Buscar, Lector, Cargar, Lector modo noche y Fundamentos (paleta día/noche con ratios de contraste, tipografía, componentes y reglas). El candidato revisó y aprobó el lienzo antes de escribir código; con la aprobación exigió responsive de primera clase y que las herramientas quedaran registradas en esta documentación. Lienzo: <https://claude.ai/artifact/TZ1ZE9HYMMuvuQ14y4uQAo> |
+| Gentle AI (plugin de Claude Code) | Mismo modelo | Aporta las definiciones de los sub-agentes de revisión (`review-reliability`, `review-refuter`) y las reglas de orquestación que se siguieron: delegar la escritura a un único writer por área, revisar con contexto fresco, refutar los hallazgos críticos antes de corregir, re-revisar solo el diff del fix, y la política de commits convencionales sin atribución de IA |
+| CodeGraph (servidor MCP de índice estructural) | No aplica (herramienta determinista) | Índice de símbolos y dependencias del repositorio que se inyectaba como contexto estructural en cada turno del orquestador (qué componente renderiza a cuál, qué interfaz implementa qué clase), reduciendo lecturas de archivos para responder preguntas de arquitectura |
+| Navegador integrado de la aplicación de escritorio de Claude | No aplica | Verificación visual de la aplicación por la sesión orquestadora: búsqueda con resaltado y badge de latencia, visor con historial de versiones y aviso de versión desactualizada, página de carga, indicador de conexión SSE; recorridos a 375, 768 y 1280 px en modo día y noche durante el rediseño |
+| Memoria persistente de Claude Code (notas por proyecto) | No aplica | Notas entre sesiones con la fecha de entrega, las decisiones cerradas y dos convenciones aprendidas por corrección del candidato: copy en español neutro sin voseo y compatibilidad del `tsconfig` con TypeScript 7 en el editor |
 
 Tipos de sub-agente empleados por el orquestador:
 
@@ -24,8 +28,10 @@ Tipos de sub-agente empleados por el orquestador:
   código en la mano antes de que se corrija nada; solo lo que sobrevive entra al ciclo de
   corrección.
 
-Aparte de Claude Code y Claude Design no se utilizó ninguna otra herramienta de IA (ni
-autocompletado en el editor, ni generadores de imágenes, ni otros modelos).
+Aparte de las herramientas de la tabla no se utilizó ninguna otra herramienta de IA (ni
+autocompletado en el editor, ni generadores de imágenes, ni otros modelos). Testcontainers,
+Docker, pdf-parse y el resto de dependencias del proyecto son herramientas de desarrollo, no
+de IA, y se listan en `docs/architecture.md`.
 
 ## 2. Casos de uso de IA por etapa
 
