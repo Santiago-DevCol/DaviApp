@@ -109,3 +109,45 @@ Format per entry: stage, tool, what was asked, what came back, human validation 
   healthchecks and a `seed` profile. Two real fixes found only by building: `**/storage` in
   `.dockerignore` excluded the `infrastructure/storage` source folder; `expires` + `add_header`
   produced a duplicate `Cache-Control`.
+
+## 2026-10-28 — Iteration 2: content versioning (one backend writer, one frontend writer, review + refutation)
+
+- **Trigger**: after the initial delivery the candidate reviewed the app and proposed four
+  improvements: content versioning, real metadata from PDF/front matter, upload + queue atomicity
+  with a stale-row sweeper, and chunking for large documents.
+- **Candidate decision**: implement only versioning, minimal scope, nothing that already works
+  gets touched; points 2-4 go to a justified roadmap in `architecture.md` (section 9.1) because
+  of the deadline (Thursday 29 Oct, 11:30), not because they were rejected technically.
+- **Conceptual correction by the AI** (accepted by the candidate): the first idea was "same
+  content -> automatic patch version". The AI argued against it: a patch with no byte change is a
+  meaningless number and breaks the idempotency of bulk uploads; a duplicate must be an
+  informative answer (`duplicateOf`), not a version nor an error. It also separated identity from
+  fingerprint (identity = normalized title + author in `document_key`; fingerprint = SHA-256 of
+  the uploaded bytes in `content_hash`) and chose bytes over extracted text because the 202 is
+  immediate and the text only exists later in the worker.
+- **What came back**: migration `0002` (columns, SQL backfill with `unaccent` matching
+  `buildDocumentKey`, partial index on `(document_key) WHERE is_latest` and composite
+  `(document_key, content_hash)`), domain helpers `document-key.ts` and `semver.ts`, upload rules
+  in `UploadDocumentsUseCase`, `is_latest` filter in the search CTE and in `countMatches`,
+  `versions` in `DocumentDetail`, duplicate badge and assigned version in the tracked list,
+  version history and outdated banner in the viewer, `documents-versioning.integration-spec.ts`.
+- **Independent review (reliability lens)**: CRITICAL — the duplicate rule compared against any
+  version with the same hash (`findByKeyAndHash`), so a document whose indexing ended in `ERROR`
+  could not be re-uploaded with the same bytes; the retry was reported as a duplicate of the
+  failed row. The refuter could not refute it. Fixed with TDD (4 new unit specs + 1 integration
+  test through the real repository): the rule now consults only the current latest version and
+  excludes `ERROR`; bytes of an older superseded version count as a rollback (commit `f94e5b4`).
+  Scoped re-review of the fix diff.
+- **Tolerant semver**: the kata's `version` is free text; the AI proposed and the candidate
+  accepted a tolerant parser (leading `v`, 1-3 numeric components, prerelease) where unparsable
+  input never breaks the upload, plus an effective version that never goes backwards
+  (`max(sent, bumpPatch(latest))`, commit `eba548c`).
+- **Verification by the orchestrator session**: `pnpm test`, `pnpm lint` and
+  `pnpm --filter backend test:integration` re-run; duplicate -> new version -> previous version
+  gone from `/search` and listed under "Versiones" in the viewer reproduced against the Docker
+  stack. Totals after the iteration: backend 163 unit/e2e tests in 21 suites, 16 integration
+  tests in 2 suites; frontend 54 tests in 12 files.
+- **Known limits accepted and documented** (`architecture.md` 6b.5): `unaccent` vs NFD for
+  `ø`/`ß`/`æ` in the backfill only; pre-migration rows keep an empty `content_hash`; two
+  concurrent uploads of the same identity are not serialized (advisory lock in the roadmap);
+  orphan file if the process dies between `storage.save` and the insert.

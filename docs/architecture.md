@@ -108,7 +108,7 @@ flowchart TD
   B --> C["SearchDocumentsUseCase<br/>SearchQuery.create: trim, longitud ≤ 200, pageSize ≤ 50"]
   C --> D["SearchEngine port<br/>PostgresSearchEngine adapter"]
   D --> E["CTE q<br/>websearch_to_tsquery('spanish_unaccent', $q)"]
-  E --> F["CTE hits<br/>WHERE numnode(q) > 0 AND status = 'INDEXED'<br/>AND search_vector @@ q<br/>ORDER BY ts_rank_cd DESC, created_at DESC<br/>count(*) OVER () · LIMIT/OFFSET"]
+  E --> F["CTE hits<br/>WHERE numnode(q) > 0 AND status = 'INDEXED'<br/>AND is_latest AND search_vector @@ q<br/>ORDER BY ts_rank_cd DESC, created_at DESC, id DESC<br/>count(*) OVER () · LIMIT/OFFSET"]
   F --> G["SELECT final sobre ≤ pageSize filas<br/>JOIN documents · ts_headline contenido y título"]
   G --> H["{ items, total, page, pageSize, tookMs }<br/>+ header X-Response-Time"]
 ```
@@ -437,14 +437,14 @@ pasar del contador en memoria a una secuencia de base de datos.
 | `backend/src/shared/http/http-exception.filter.ts` | Filtro global que normaliza todo error al contrato `ApiError` |
 | `backend/src/shared/database/` | Pool node-postgres, Drizzle, esquema declarativo con `tsvector` y GIN, runner de migraciones |
 | `backend/src/shared/queue/` | Provider global de pg-boss (esquema `pgboss`) |
-| `backend/drizzle/*.sql` | Migraciones SQL versionadas (`0000_init.sql`, `0001_document_file_name.sql`) |
+| `backend/drizzle/*.sql` | Migraciones SQL versionadas (`0000_init.sql`, `0001_document_file_name.sql`, `0002_document_versioning.sql`) |
 | `backend/src/documents/domain/` | Agregado `Document` con transiciones, errores con `code` estable, puertos |
 | `backend/src/documents/application/` | `UploadDocuments`, `IndexDocument`, `FailDocument`, `GetDocument`, mappers, fakes |
 | `backend/src/documents/infrastructure/` | Controlador multipart, DTOs class-validator, filtro de errores de dominio, repositorio Drizzle, almacenamiento local, extractor pdf-parse, cola y worker pg-boss, publisher EventEmitter2 |
 | `backend/src/search/` | `SearchQuery` (value object), puerto `SearchEngine`, `SearchDocumentsUseCase`, controlador y `PostgresSearchEngine` |
 | `backend/src/notifications/` | `EventReplayBuffer` (dominio), `NotificationsHub`, listener, `EventsController` SSE |
 | `backend/src/health/` | `GET /health` con sonda a la base; 503 si está caída |
-| `backend/test/search.integration-spec.ts` | Integración FTS con Testcontainers |
+| `backend/test/search.integration-spec.ts`, `backend/test/documents-versioning.integration-spec.ts` | Integración FTS y versionado (backfill, índices, `is_latest`) con Testcontainers |
 | `backend/scripts/` | `migrate.ts`, `seed.ts` (300 docs), `synthetic-documents.ts`, `bench-search.ts`, `generate-sample-pdfs.ts` |
 | `frontend/src/app/` | Router (`/upload`, `/search`, `/documents/:id`), providers (QueryClient, toasts, SSE) |
 | `frontend/src/api/` | Cliente `fetch` tipado con `ApiError`, `EventSource` |
@@ -483,6 +483,123 @@ stateDiagram-v2
   (`indexing-failure.ts`) y registran el detalle interno a través del logger del caso de uso.
 - El job es idempotente: si el documento ya no está en `PROCESSING`, se retorna sin tocarlo.
 - La UI traduce los estados a `PROCESANDO / INDEXADO / ERROR` (`frontend/src/lib/status.ts`).
+
+## 6b. Versionado por contenido
+
+Segunda iteración, posterior a la entrega inicial del kata. Objetivo: que subir dos veces el
+mismo archivo no cree dos documentos, y que subir una nueva edición de la misma obra la agrupe
+con las anteriores en lugar de aparecer como un resultado más en la búsqueda. El alcance se
+mantuvo mínimo a propósito: ninguna ruta nueva, ningún estado nuevo, ninguna transición nueva.
+
+### 6b.1 Tres conceptos, tres columnas
+
+| Concepto | Columna | Definición | Dónde |
+|---|---|---|---|
+| Identidad | `document_key` | `normalize(title) + '\|' + normalize(author)`: NFD y eliminación de diacríticos, minúsculas, `trim`, espacios colapsados a uno | `backend/src/documents/domain/document-key.ts` (`buildDocumentKey`); backfill SQL en `backend/drizzle/0002_document_versioning.sql` con `btrim(regexp_replace(lower(unaccent(...)), '\s+', ' ', 'g'))` |
+| Huella | `content_hash` | SHA-256 (hex) de los **bytes** del archivo, calculado en la petición que responde 202 | `upload-documents.use-case.ts` (`sha256(upload.file.buffer)`) |
+| Versión | `version` (ya existía) + `is_latest` | Metadato semver que exige el kata; `is_latest` marca la versión vigente de cada identidad | `backend/src/documents/domain/semver.ts`, `document.ts` (`supersede()`) |
+
+**Por qué la identidad es título + autor y no el hash.** El hash identifica bytes, no obras:
+dos ediciones del mismo manual tienen hashes distintos y deben agruparse; el mismo archivo con
+otro título es, para el usuario, otro documento. La identidad tiene que salir de lo que el
+usuario declara. Se normaliza para que "Guía Técnica" y "guia tecnica" coincidan, pero **no** se
+corrige ortografía: un typo en el título crea otra identidad, y eso se prueba de forma
+explícita (`upload-documents.use-case.spec.ts`) porque es un límite que el evaluador puede
+preguntar.
+
+**Por qué la huella es de los bytes y no del texto extraído.** El 202 es inmediato: el caso de
+uso responde en cuanto el archivo está en disco y la fila en `PROCESSING`; el texto extraído
+solo existe después, en el worker. Un hash del texto obligaría a extraer en la petición HTTP
+(rompiendo la decisión 2.5) o a detectar el duplicado cuando el documento ya fue creado y
+encolado. El hash de bytes es determinista, síncrono y barato (un `createHash` sobre un buffer
+que ya está en memoria). Consecuencia aceptada: la misma obra en `.txt` y en `.pdf` tiene
+huellas distintas y se trata como nueva versión.
+
+**La normalización TS y SQL deben coincidir.** El backfill de filas anteriores a la migración
+se hace en SQL con `unaccent`, y las filas nuevas se calculan en TypeScript con NFD. La prueba
+`backfills document_key with the same normalization as buildDocumentKey`
+(`backend/test/documents-versioning.integration-spec.ts`) inserta títulos con acentos,
+mayúsculas y espacios irregulares y comprueba que ambas rutas producen la misma clave.
+
+### 6b.2 Semver tolerante y versión efectiva
+
+`semver.ts` acepta `v`/`V` inicial, núcleo de uno a tres componentes (`1` → `1.0.0`,
+`1.2` → `1.2.0`) y prerelease (`-beta`, `-rc.1`, que ordena por debajo de su release). Lo que
+no se puede interpretar no es un error: ordena por debajo de todo lo interpretable y
+`bumpPatch` lo trata como `0.0.0` → `0.0.1`. Una versión de texto libre nunca rompe la carga.
+
+Versión efectiva (`resolveEffectiveVersion`, `upload-documents.use-case.ts`):
+`efectiva = max(enviada, bumpPatch(última))`. Si la enviada es mayor o igual que el siguiente
+patch de la última, se respeta tal cual (`v2.0.0` se guarda como `v2.0.0`); si no, se asigna
+`bumpPatch(última)` y el ítem del 202 lo informa en `version`. La primera versión de una
+identidad es siempre la enviada. **La versión nunca retrocede**, aunque el usuario reenvíe
+`1.0.0` sobre una `1.0.3`.
+
+### 6b.3 Reglas de carga
+
+Solo se consulta la **última versión vigente** de la identidad (`findLatestByKey`); las
+versiones ya reemplazadas nunca influyen en la decisión.
+
+| Situación al subir un archivo | Resultado | Ítem del 202 |
+|---|---|---|
+| Misma identidad, mismos bytes que la última versión y esa versión **no** está en `ERROR` | **Duplicado**: no se crea fila, archivo ni job | `{ id: <existente>, status: <existente>, version: <existente>, duplicateOf: { id, version } }` |
+| Misma identidad, mismos bytes, pero la última versión está en `ERROR` | **Reintento** como nueva versión (la indexación anterior falló; volver a intentarlo es legítimo) | `{ id: <nuevo>, status: PROCESSING, version: <efectiva> }` |
+| Misma identidad, bytes de una versión **antigua** ya reemplazada | **Rollback** como nueva versión: el historial sigue siendo lineal y la "vuelta atrás" queda registrada | igual que la fila anterior |
+| Misma identidad, bytes distintos | **Nueva versión**: la anterior pasa a `is_latest = false` (`supersede()`), la nueva es `is_latest = true` | igual que la fila anterior |
+| Identidad nueva | **Documento nuevo**, `is_latest = true` | `{ id, status: PROCESSING, version: <enviada> }` |
+
+Orden de efectos para una versión nueva: `storage.save` → `repository.save(nueva)` →
+`supersede()` + `repository.update(anterior)` → `enqueueIndexDocument`. El reemplazo de la
+anterior ocurre **después** de insertar la nueva para que un fallo en el insert nunca deje una
+identidad sin versión vigente. A partir del insert, cualquier fallo (al reemplazar o al encolar)
+pasa por `failDocumentOnError`: marca la nueva fila en `ERROR` con un motivo público y relanza,
+de modo que nunca queda un documento en `PROCESSING` sin job.
+
+**Por qué "mismo contenido" no es un patch.** La primera propuesta del candidato fue que el
+mismo archivo reenviado generara automáticamente una versión patch. Se descartó tras discutirlo:
+un patch sin cambio de bytes es un número sin significado, la carga masiva dejaría de ser
+idempotente (cada reintento de un lote crearía versiones nuevas) y la búsqueda no ganaría nada.
+El duplicado es, por tanto, una respuesta informativa (`duplicateOf`) y no un error ni una
+versión. La única excepción es la última versión en `ERROR`: ahí el mismo contenido sí crea una
+versión nueva, porque lo que se repite es el intento de indexar, no el documento.
+
+### 6b.4 Persistencia, búsqueda y visor
+
+- **Índices** (`0002_document_versioning.sql`): `documents_key_latest_idx` parcial sobre
+  `(document_key) WHERE is_latest`, que es exactamente lo que consulta `findLatestByKey` y
+  mantiene el índice del tamaño del número de identidades, no de versiones; y
+  `documents_key_hash_idx` compuesto `(document_key, content_hash)`, que respalda
+  `findByKeyAndHash`. Este último método se conserva en el puerto pero ya no decide el
+  duplicado (la regla pasó a depender de la última versión, no de cualquier versión).
+- **Búsqueda** (`postgres-search.engine.ts`): `AND d.is_latest` tanto en la CTE `hits` como
+  en `countMatches`, para que `total` y la página cuenten lo mismo. Las versiones reemplazadas
+  siguen siendo legibles por `GET /documents/:id`, pero salen de los resultados. Prueba:
+  `search returns only the latest version of a document key` (dos versiones → un solo hit, la
+  última).
+- **Detalle** (`get-document.use-case.ts`): `DocumentDetail` incluye `documentKey`,
+  `contentHash`, `isLatest` y `versions` (todas las versiones de la identidad, la más reciente
+  primero, vía `listVersionsByKey`).
+- **Frontend**: en la lista de cargas (`TrackedUploadsList.tsx`) un duplicado se muestra con
+  badge neutral "Duplicado", el texto "Ya existía como versión X" y enlace al documento
+  existente; si la versión efectiva difiere de la enviada se muestra "Versión asignada: vX
+  (enviada vY)". En el visor, `MetadataPanel.tsx` lista las versiones con la actual marcada y
+  enlaces a cada una, y `OutdatedVersionBanner.tsx` muestra "Existe una versión más reciente"
+  con enlace a la vigente cuando `isLatest === false`.
+
+### 6b.5 Límites de esta iteración
+
+- `unaccent` (SQL) y NFD (TypeScript) coinciden para los diacríticos del español, pero no para
+  letras sin descomposición canónica (`ø`, `ß`, `æ`): `unaccent` las transforma y NFD no. Una
+  fila anterior a la migración con esas letras en el título podría no agruparse con una carga
+  nueva. Afecta solo al backfill; las filas nuevas usan siempre la ruta TypeScript.
+- Las filas anteriores a la migración conservan `content_hash = ''` (los bytes originales no se
+  releen al migrar): nunca se detectan como duplicado, y la primera recarga crea una versión
+  nueva sobre ellas.
+- Dos cargas **concurrentes** de la misma identidad no se serializan: ambas pueden leer la misma
+  "última" y quedar las dos con `is_latest = true`. Cierre previsto en el roadmap (sección 9,
+  punto 1) con `pg_advisory_xact_lock(hashtext(document_key))`.
+- Si el proceso cae entre `storage.save` y `repository.save` queda un archivo huérfano en
+  `STORAGE_DIR` sin fila; lo recoge el barrido del roadmap.
 
 ## 7. Manejo de errores y validación
 
@@ -526,10 +643,10 @@ stateDiagram-v2
 
 | Tipo | Qué cubre | Cómo | Cantidad |
 |---|---|---|---|
-| Unitarias (backend) | Agregado `Document` y transiciones, resolución de formato, `UploadDocuments`, `IndexDocument`, `FailDocument`, `GetDocument`, `SearchQuery`, `SearchDocuments`, `EventReplayBuffer`, worker (último intento), `indexing-failure` (mensajes públicos), `error-details`, extractor, `env.schema`, `HttpExceptionFilter`, `HealthController`, `EventsController` | Jest + ts-jest; fakes de puertos en memoria (`__fakes__/`); sin base de datos | Backend: 127 pruebas unitarias/e2e en 19 suites |
-| E2E de controlador (backend) | `DocumentsController` (multipart, validación, 202, 404) y `SearchController` (DTO, filtros, headers) | `@nestjs/testing` + supertest con casos de uso reales sobre fakes | Incluidas en las 19 suites (`*.e2e-spec.ts`) |
-| Integración (backend) | Ranking título > contenido, mapeo de columnas, acentos y stemming español, frases entre comillas, highlight con `<mark>` y ≤ 2 fragmentos, paginación estable, paginación determinista con 40 filas de rank y fecha idénticos (desempate por `id`), solo `INDEXED`, stopwords, uso del GIN vía `EXPLAIN`, latencia p95 < 1 s sobre 20 consultas | Testcontainers `postgres:16-alpine` o `TEST_DATABASE_URL`; migraciones reales; 300 docs + fixtures | 11 pruebas en `backend/test/search.integration-spec.ts` |
-| Frontend | Validación de carga, `useSearch` (debounce y URL), `SearchPage`, `SearchResultCard`, `useDocumentEvents` (patch de caché, toasts, reconexión y resincronización), `useUploadDocuments` (carrera evento-antes-del-202, alineación de `FormData`, polling), `UploadPage` (límite de 20 archivos), `DocumentPage`, `highlight`, `status` | Vitest + Testing Library + MSW; `EventSource` simulado (`frontend/src/test/mockEventSource.ts`) | 44 pruebas en 10 archivos |
+| Unitarias (backend) | Agregado `Document` y transiciones (incluido `supersede`), `buildDocumentKey`, semver tolerante (`parseVersion`, `compareVersions`, `bumpPatch`), resolución de formato, `UploadDocuments` (duplicado, reintento tras `ERROR`, rollback, bump automático, versión mayor respetada, typo = otra identidad, fallo al reemplazar), `IndexDocument`, `FailDocument`, `GetDocument` (historial de versiones), `SearchQuery`, `SearchDocuments`, `EventReplayBuffer`, worker (último intento), `indexing-failure` (mensajes públicos), `error-details`, extractor, `env.schema`, `HttpExceptionFilter`, `HealthController`, `EventsController` | Jest + ts-jest; fakes de puertos en memoria (`__fakes__/`); sin base de datos | Backend: 163 pruebas unitarias/e2e en 21 suites |
+| E2E de controlador (backend) | `DocumentsController` (multipart, validación, 202, 404) y `SearchController` (DTO, filtros, headers) | `@nestjs/testing` + supertest con casos de uso reales sobre fakes | Incluidas en las 21 suites (`*.e2e-spec.ts`) |
+| Integración (backend) | Búsqueda (`search.integration-spec.ts`): ranking título > contenido, mapeo de columnas, acentos y stemming español, frases entre comillas, highlight con `<mark>` y ≤ 2 fragmentos, paginación estable, paginación determinista con 40 filas de rank y fecha idénticos (desempate por `id`), solo `INDEXED`, stopwords, uso del GIN vía `EXPLAIN`, latencia p95 < 1 s sobre 20 consultas. Versionado (`documents-versioning.integration-spec.ts`): índices creados por la migración, backfill SQL == `buildDocumentKey`, búsqueda solo `is_latest`, duplicado sin fila nueva y nueva versión que reemplaza a la anterior contra el repositorio Drizzle real, reintento con los mismos bytes sobre una última versión en `ERROR` | Testcontainers `postgres:16-alpine` o `TEST_DATABASE_URL`; migraciones reales; 300 docs + fixtures | 16 pruebas en 2 suites (11 + 5) en `backend/test/` |
+| Frontend | Validación de carga, `useSearch` (debounce y URL), `SearchPage`, `SearchResultCard`, `useDocumentEvents` (patch de caché, toasts, reconexión y resincronización), `useUploadDocuments` (carrera evento-antes-del-202, alineación de `FormData`, polling), `UploadPage` (límite de 20 archivos), `TrackedUploadsList` (duplicado y versión asignada), `DocumentPage`, `MetadataPanel` (historial de versiones) y `OutdatedVersionBanner`, `highlight`, `status` | Vitest + Testing Library + MSW; `EventSource` simulado (`frontend/src/test/mockEventSource.ts`) | 54 pruebas en 12 archivos |
 
 Comandos: `pnpm test` (unitarias de todos los paquetes), `pnpm --filter backend test:integration`
 (requiere Docker o `TEST_DATABASE_URL`), `pnpm lint` (`tsc --noEmit`).
@@ -537,38 +654,117 @@ Comandos: `pnpm test` (unitarias de todos los paquetes), `pnpm --filter backend 
 ## 9. Límites conocidos y trabajo futuro
 
 Se listan de forma explícita para la sustentación; ninguno impide cumplir el checklist del kata,
-pero todos son preguntas razonables de un evaluador senior.
+pero todos son preguntas razonables de un evaluador senior. Tras la segunda iteración (sección
+6b) quedaron cerrados el agotamiento de reintentos sin evento (`FailDocumentUseCase`), la
+paginación determinista (desempate por `id`) y la carrera evento-antes-del-202 en el frontend;
+ya no figuran aquí.
 
-1. **Sin transacción entre el `INSERT` en `documents` y el `send` a pg-boss**
-   (`upload-documents.use-case.ts`). Si el proceso cae entre ambos, queda una fila en
-   `PROCESSING` sin job. Se mitiga marcando `ERROR` si `send` falla con excepción, pero no cubre
-   un crash. Solución: unidad de trabajo que use la misma transacción para la fila y el job (pg-boss
-   permite `send` con un `db` propio), o un barrido periódico de filas `PROCESSING` antiguas.
-2. **`FailDocumentUseCase` es check-then-write**: lee el estado, decide y escribe. En una sola
-   instancia es seguro porque el worker procesa con `batchSize: 1`; con varios workers habría
-   que convertirlo en `UPDATE ... WHERE status = 'PROCESSING'` atómico.
-3. **Crash o timeout duro en el último intento** (`expireInSeconds: 300`): si el proceso muere
-   dentro del último intento, no llega a ejecutarse `FailDocument` y el documento queda en
-   `PROCESSING`. Falta un sweeper de filas obsoletas (por `updated_at`) que las marque `ERROR`.
-4. **Los ids del replay buffer reinician en 1 al reiniciar el proceso**
+### 9.1 Roadmap priorizado
+
+Son las mejoras que el candidato evaluó junto con el versionado y decidió **no** implementar
+dentro del plazo (entrega jueves 29 de octubre, 11:30). El orden es por valor frente a riesgo:
+el punto 1 cierra un límite estructural que el evaluador va a preguntar; el punto 2 luce en la
+demo; el punto 3 solo tiene sentido si sobra tiempo. Los esfuerzos son estimaciones con el mismo
+flujo de agentes, revisión y refutación usado hasta ahora.
+
+#### 1. Atomicidad carga + cola, lock por identidad y barrido de filas estancadas
+
+- **Problema.** `INSERT` en `documents` y `send` a pg-boss no comparten transacción
+  (`upload-documents.use-case.ts`). Si el proceso muere entre ambos queda una fila en
+  `PROCESSING` sin job; `failDocumentOnError` cubre la excepción, no el crash. Relacionados:
+  `FailDocumentUseCase` es check-then-write (seguro con `batchSize: 1`, no con varios workers);
+  un crash dentro del último intento (`expireInSeconds: 300`) deja el documento en `PROCESSING`;
+  dos cargas concurrentes de la misma identidad pueden dejar dos `is_latest`; un fallo entre
+  `storage.save` y el insert deja un archivo huérfano.
+- **Opción recomendada: transacción única con pg-boss.** pg-boss acepta `send(name, data,
+  { db })` con una conexión externa. Un puerto `UnitOfWork.run(fn)` abre `db.transaction` de
+  Drizzle y dentro ejecuta `pg_advisory_xact_lock(hashtext(document_key))`, el insert, el
+  `supersede` de la anterior y el `send`; si algo falla no queda nada escrito. `storage.save`
+  queda fuera (idempotente por `storageKey`) y se borra best effort si la transacción falla.
+  Complemento: `StaleDocumentsSweeper` (intervalo de 5 min) que marca `ERROR` con motivo
+  "Indexing timed out" las filas `PROCESSING` con más de 15 min sin job activo en `pgboss.job`,
+  publica el evento SSE y borra archivos de `STORAGE_DIR` sin fila con más de 1 h; y el guard de
+  `FailDocument` convertido en `UPDATE ... WHERE status = 'PROCESSING'`.
+- **Alternativa descartada: outbox clásico.** Tabla `outbox` escrita en la misma transacción y
+  un publicador que encola. Patrón reconocible, pero es una segunda cola delante de una cola que
+  ya vive en Postgres: más código, más latencia, sin ganancia de consistencia.
+- **Pruebas previstas.** Unitarias con UoW falso (commit/rollback) y sweeper con reloj fijo;
+  integración con Testcontainers: fallo simulado tras el insert → ni fila ni job; sweeper marca
+  `ERROR` y emite evento; dos cargas concurrentes de la misma clave → exactamente un `is_latest`.
+- **Esfuerzo estimado.** ~2.5 h.
+- **Por qué se pospuso.** Es el cambio con más plomería de infraestructura (pg-boss y Drizzle
+  compartiendo la misma transacción) y el que más toca el camino de carga que ya funciona y está
+  probado; con la entrega a menos de un día, el riesgo de regresión pesaba más que el beneficio
+  en la demo. El límite queda documentado y acotado en lugar de abierto a medias.
+
+#### 2. Metadatos reales desde el archivo para prellenar el formulario
+
+- **Problema.** Hoy el usuario escribe título, autor y versión a mano para cada archivo. Los PDF
+  traen `info.Title/Author` y los Markdown pueden traer front matter; ignorarlos genera errores
+  de tipeo que, con el versionado por identidad, se convierten en documentos distintos.
+- **Opción recomendada: `POST /documents/inspect`.** Endpoint síncrono, multipart, mismos
+  límites (20 archivos, 10 MB); devuelve por archivo `{ fileName, suggested: { title?, author?,
+  version?, category?, tags? }, pages?, source: 'pdf-info' | 'front-matter' | 'heuristic' |
+  'none' }` y no persiste nada. Puerto `MetadataExtractor` en el dominio con adaptadores: PDF →
+  `pdf-parse` (`info.Title`, `info.Author`, `numpages`); Markdown → front matter YAML con
+  `gray-matter` y, si no hay, el primer `# H1`; TXT → primera línea no vacía. Sanitización con
+  las mismas longitudes del DTO (200/20/50) y sin caracteres de control. `pages` se persistiría
+  (migración `0003`) para mostrarlo en el visor. El frontend llama a `inspect` al agregar
+  archivos, prellena **solo campos vacíos** (nunca pisa lo que el usuario escribió) y muestra el
+  origen ("sugerido desde el PDF").
+- **Alternativa descartada: enriquecer solo en el worker.** Sin cambios de UI, pero el
+  formulario no se prellena y el usuario sigue tipeando; además la identidad (`document_key`)
+  ya estaría calculada con el valor tipeado cuando el worker leyera el metadato real. Se
+  descartó porque no resuelve el problema de fondo (la entrada manual).
+- **Pruebas previstas.** Unitarias con fixtures reales (PDF con `info`, MD con y sin front
+  matter, TXT); e2e del endpoint; Vitest del prellenado sin pisar valores del usuario.
+- **Esfuerzo estimado.** ~2 h.
+- **Por qué se pospuso.** Añade una ruta, un puerto, dos dependencias y una migración; es
+  visible en la demo pero no cierra ningún requisito del kata ni ningún límite estructural. Se
+  prioriza detrás del punto 1.
+
+#### 3. Documentos grandes: chunking frente a porción indexada
+
+- **Problema.** `tsvector` tiene un tope de 1 MB por fila; un archivo de 10 MB con alta
+  diversidad léxica lo supera y termina en `ERROR` (hoy con mensaje accionable y sin exponer
+  SQL). Además `ts_headline` relee el contenido completo de cada fila de la página.
+- **Opción recomendada si se hace: chunking.** Tabla `document_chunks (id, document_id,
+  ordinal, content, search_vector GENERATED, GIN)`; el worker parte el texto en ~2.000 palabras
+  con solape de 100; la búsqueda hace la CTE sobre chunks, `max(rank)` por documento y el
+  highlight sobre el mejor chunk; `documents.content` se conserva íntegro para el visor. Sin
+  límite de tamaño, highlight más preciso, ranking por mejor fragmento. Coste: migración, cambio
+  del SQL de búsqueda (`count(*) OVER()` pasa a contar documentos distintos) y nueva suite de
+  integración.
+- **Alternativa descartada: porción normalizada.** Indexar solo `left(content, 500_000)` en el
+  `tsvector`. Una línea de SQL, pero lo que queda fuera no se encuentra y hay que explicárselo al
+  usuario; se guarda como mitigación de emergencia, no como solución.
+- **Esfuerzo estimado.** ~3 h (opción A).
+- **Por qué se pospuso.** Es el punto de mayor esfuerzo y menor impacto en el checklist: el
+  caso (documentos de varios MB de texto único) no aparece en la demo y el fallo actual es
+  explícito y controlado. Solo se haría con tiempo sobrante tras los puntos 1 y 2.
+
+### 9.2 Límites que siguen vigentes
+
+1. **Sin transacción entre `INSERT` y `send`, guard check-then-write, crash en el último
+   intento, dos `is_latest` concurrentes y archivo huérfano**: ver roadmap 9.1, punto 1.
+2. **Los ids del replay buffer reinician en 1 al reiniciar el proceso**
    (`event-replay-buffer.ts`): un `Last-Event-ID` anterior al reinicio no es comparable. El GET
    inicial de `useTrackedUploads` y el poll de 15 s en el visor cubren el hueco en la práctica;
    la solución definitiva es una secuencia persistente.
-5. **`SearchResultItem` en `@techdocs/shared` no incluye `fileName` ni `createdAt`**, que el
+3. **`SearchResultItem` en `@techdocs/shared` no incluye `fileName` ni `createdAt`**, que el
    backend sí devuelve (`SearchResultItemDetail` en `search-documents.use-case.ts`). Es
    deliberado para no tocar el contrato antes de que el frontend los consuma; debe promoverse al
    paquete compartido.
-6. **`rank` no está normalizado** (`ts_rank_cd` sin flag de normalización): sirve para ordenar
+4. **`rank` no está normalizado** (`ts_rank_cd` sin flag de normalización): sirve para ordenar
    pero no es comparable entre consultas distintas.
-7. **El contenido sintético del seed incluye el título** (`synthetic-documents.ts`), lo que
+5. **El contenido sintético del seed incluye el título** (`synthetic-documents.ts`), lo que
    infla ligeramente la coincidencia en contenido para documentos generados; los fixtures de la
    suite de integración no tienen ese sesgo.
-8. **FTS solo en español**: términos en inglés se indexan sin stemming; sin tolerancia a errores
+6. **FTS solo en español**: términos en inglés se indexan sin stemming; sin tolerancia a errores
    tipográficos (ver 4.4 para la ruta de migración).
-9. **Ejecución en un solo proceso** (API + worker + hub SSE) por simplicidad del demo; la sección
+7. **Ejecución en un solo proceso** (API + worker + hub SSE) por simplicidad del demo; la sección
    4 documenta la separación.
-10. **Límite de `tsvector` (1 MB)**: un documento con alta diversidad léxica puede generar un
-    vector mayor y terminar en `ERROR`; el límite de subida de 10 MB no garantiza que el
-    contenido sea indexable. El usuario recibe un mensaje claro y el SQL no se expone.
-    Mitigación futura: indexar una porción normalizada del texto o mover el FTS a una tabla
-    dedicada.
+8. **Límite de `tsvector` (1 MB)**: ver roadmap 9.1, punto 3.
+9. **Versionado** (sección 6b.5): `unaccent` frente a NFD para `ø`/`ß`/`æ` en el backfill;
+   filas previas con `content_hash` vacío; misma obra en dos formatos tratada como nueva
+   versión; un typo en el título es otra identidad hasta que exista el prellenado del punto 2.
