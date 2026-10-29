@@ -2,7 +2,7 @@ import { useLocation } from 'react-router-dom';
 import { describeError } from '@/api/client';
 import { Spinner } from '@/components/atoms';
 import { EmptyState, ErrorState } from '@/components/molecules';
-import { LatencyBadge } from './components/LatencyBadge';
+import { SearchLatency } from './components/SearchLatency';
 import { Pagination } from './components/Pagination';
 import { SearchBar } from './components/SearchBar';
 import { SearchResultCard } from './components/SearchResultCard';
@@ -58,7 +58,7 @@ export function SearchPage() {
                 ? 'Sin resultados'
                 : `${data.total} ${data.total === 1 ? 'resultado' : 'resultados'} para «${q}»`}
             </p>
-            <LatencyBadge tookMs={data.tookMs} />
+            <SearchLatency tookMs={data.tookMs} />
           </div>
 
           {data.total === 0 ? (

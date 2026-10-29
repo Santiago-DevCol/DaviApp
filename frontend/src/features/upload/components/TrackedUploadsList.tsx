@@ -1,7 +1,6 @@
 import { DocumentStatus } from '@techdocs/shared';
 import { Link } from 'react-router-dom';
-import { Badge, Button, Spinner } from '@/components/atoms';
-import { presentStatus } from '@/lib/status';
+import { Button, Spinner, StatusDot } from '@/components/atoms';
 import type { TrackedUploadView } from '../useTrackedUploads';
 
 export interface TrackedUploadsListProps {
@@ -26,7 +25,6 @@ export function TrackedUploadsList({ entries, onRemove, onClear }: TrackedUpload
       </div>
       <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
         {entries.map((entry) => {
-          const presentation = entry.status ? presentStatus(entry.status) : null;
           return (
             <li key={entry.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
               <div className="min-w-0 flex-1">
@@ -42,13 +40,10 @@ export function TrackedUploadsList({ entries, onRemove, onClear }: TrackedUpload
                 )}
               </div>
               <div className="flex items-center gap-3">
-                {presentation ? (
-                  <Badge tone={presentation.tone}>
-                    {entry.status === DocumentStatus.PROCESSING && <Spinner size="sm" label="Procesando" />}
-                    {presentation.label}
-                  </Badge>
+                {entry.status ? (
+                  <StatusDot status={entry.status} />
                 ) : entry.loadError ? (
-                  <Badge tone="neutral">Desconocido</Badge>
+                  <StatusDot tone="neutral" label="Desconocido" />
                 ) : (
                   <Spinner size="sm" label="Consultando estado" />
                 )}

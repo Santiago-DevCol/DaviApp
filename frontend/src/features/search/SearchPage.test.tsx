@@ -37,7 +37,7 @@ describe('SearchPage', () => {
     expect(screen.getByText('1 resultado para «kubernetes»')).toBeInTheDocument();
     expect(screen.getByText('12 ms')).toBeInTheDocument();
     expect(document.querySelectorAll('mark')).toHaveLength(2);
-    expect(screen.getByText('INDEXADO')).toBeInTheDocument();
+    expect(screen.getByText('Indexado')).toBeInTheDocument();
   });
 
   it('shows a no-results state', async () => {

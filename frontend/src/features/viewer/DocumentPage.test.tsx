@@ -21,7 +21,7 @@ describe('DocumentPage', () => {
     expect(screen.getByText('kubectl apply')).toBeInTheDocument();
     expect(screen.getByText('Paso uno').closest('ul')).not.toBeNull();
     expect(screen.getByText('Equipo Plataforma')).toBeInTheDocument();
-    expect(screen.getByText('INDEXADO')).toBeInTheDocument();
+    expect(screen.getByText('Indexado')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Volver a resultados/ })).toHaveAttribute('href', '/search');
     // Keep the per-test timeout above the 5 s wait for the lazy chunk; Vitest defaults to 5 s.
   }, 10_000);
@@ -34,7 +34,7 @@ describe('DocumentPage', () => {
     });
 
     expect(await screen.findByText('El documento se está procesando')).toBeInTheDocument();
-    expect(screen.getByText('PROCESANDO')).toBeInTheDocument();
+    expect(screen.getByText('Procesando')).toBeInTheDocument();
 
     // The backend finishes indexing: the detail now has content, and the event arrives.
     setDocument({ ...PROCESSING_DOC, status: DocumentStatus.INDEXED, content: 'Texto indexado del documento.' });
@@ -48,7 +48,7 @@ describe('DocumentPage', () => {
 
     expect(await screen.findByText('Texto indexado del documento.')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText('El documento se está procesando')).toBeNull());
-    expect(screen.getByText('INDEXADO')).toBeInTheDocument();
+    expect(screen.getByText('Indexado')).toBeInTheDocument();
     // The toast viewport is rendered by the shell; here only the cache-driven UI is asserted.
   });
 

@@ -82,7 +82,7 @@ sequenceDiagram
   UP->>Q: boss.send("index-document", {documentId})
   UP-->>DC: { items: [{ id, status: PROCESSING, fileName }] }
   DC-->>UI: 202 Accepted
-  UI->>UI: guarda id en sessionStorage, muestra PROCESANDO
+  UI->>UI: guarda id en sessionStorage, muestra «Procesando»
 
   Q->>W: boss.work (batchSize 1, includeMetadata)
   W->>IX: execute(documentId)
@@ -133,8 +133,9 @@ Se interpreta como un SLO de latencia: **p95 ≤ 1 s** medido en el backend, exp
 `backend/src/search/application/search-documents.use-case.ts`). No se introduce ningún retraso
 artificial para "alcanzar" los 400 ms: un sistema que responde en 20 ms cumple el objetivo con
 margen, y penalizarlo deliberadamente sería contrario al propósito del requisito. La UI muestra
-el `tookMs` en un badge (`frontend/src/features/search/components/LatencyBadge.tsx`) para que el
-cumplimiento sea visible en la demo.
+el `tookMs` como texto discreto junto al total
+(`frontend/src/features/search/components/SearchLatency.tsx`) para que el cumplimiento sea
+visible en la demo.
 
 ### 2.2 Base de datos y motor de búsqueda: PostgreSQL 16 FTS
 
@@ -328,7 +329,7 @@ funcione tras `pnpm install`.
   reenvío de `Last-Event-ID` son nativos del navegador; el hook solo recrea el stream si el
   navegador lo marca `CLOSED` (por ejemplo, una respuesta no reintentable), tras 5 s.
 - Al recibir `document.status`: parchea de inmediato la entrada `DocumentDetail` en la caché de
-  TanStack Query (cambia el badge en todas las pantallas), invalida esa consulta (para traer
+  TanStack Query (cambia el estado en todas las pantallas), invalida esa consulta (para traer
   contenido y metadatos finales) e invalida las búsquedas (`queryKeys.searches`), y muestra un
   toast (éxito para `INDEXED`, error persistente para `ERROR`).
 - Expone el estado de conexión (`connecting | open | reconnecting | closed`) para la UI.
@@ -482,7 +483,7 @@ stateDiagram-v2
   almacenamiento en el primer intento también guardan un motivo público sanitizado
   (`indexing-failure.ts`) y registran el detalle interno a través del logger del caso de uso.
 - El job es idempotente: si el documento ya no está en `PROCESSING`, se retorna sin tocarlo.
-- La UI traduce los estados a `PROCESANDO / INDEXADO / ERROR` (`frontend/src/lib/status.ts`).
+- La UI traduce los estados a `Procesando / Indexado / Error` (`frontend/src/lib/status.ts`).
 
 ## 7. Manejo de errores y validación
 

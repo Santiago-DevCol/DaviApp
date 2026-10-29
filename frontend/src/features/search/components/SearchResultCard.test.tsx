@@ -42,7 +42,7 @@ describe('SearchResultCard', () => {
   it('shows metadata, status badge and tags', () => {
     renderCard();
     expect(screen.getByRole('link', { name: 'Guía de Kubernetes' })).toHaveAttribute('href', '/documents/doc-1');
-    expect(screen.getByText('INDEXADO')).toBeInTheDocument();
+    expect(screen.getByText('Indexado')).toBeInTheDocument();
     expect(screen.getByText('Ana')).toBeInTheDocument();
     expect(screen.getByText('v1.2.0')).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Etiquetas' })).toHaveTextContent('k8s');

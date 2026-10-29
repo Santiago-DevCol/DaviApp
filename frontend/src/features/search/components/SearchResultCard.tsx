@@ -1,8 +1,7 @@
 import type { SearchResultItem } from '@techdocs/shared';
 import { Link, type To } from 'react-router-dom';
-import { Badge, Tag } from '@/components/atoms';
+import { StatusDot, Tag } from '@/components/atoms';
 import { parseHighlight } from '@/lib/highlight';
-import { presentStatus } from '@/lib/status';
 
 export interface SearchResultCardProps {
   item: SearchResultItem;
@@ -29,7 +28,6 @@ export function Highlight({ text }: { text: string }) {
 }
 
 export function SearchResultCard({ item, to, state }: SearchResultCardProps) {
-  const status = presentStatus(item.status);
   return (
     <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <header className="flex flex-wrap items-start justify-between gap-2">
@@ -42,7 +40,7 @@ export function SearchResultCard({ item, to, state }: SearchResultCardProps) {
             {item.title}
           </Link>
         </h3>
-        <Badge tone={status.tone}>{status.label}</Badge>
+        <StatusDot status={item.status} />
       </header>
       <dl className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
         <div>

@@ -185,11 +185,11 @@ se dejan vacías a propósito: solo se marcan tras ejecutar cada paso.
       en el host) y comprobar que la tabla `documents` tiene 300 filas.
 - [ ] Abrir la UI, ir a Cargar y subir `docs/samples/sample-spec.txt`,
       `docs/samples/sample-manual.md` y `docs/samples/sample-guide.pdf` con metadatos; recibir
-      `202` y ver los tres en estado PROCESANDO.
-- [ ] Observar, sin refrescar, el paso a INDEXADO por SSE y el toast correspondiente; verificar
+      `202` y ver los tres en estado «Procesando».
+- [ ] Observar, sin refrescar, el paso a «Indexado» por SSE y el toast correspondiente; verificar
       en las herramientas del navegador que `/events` muestra `event: document.status` con `id`.
 - [ ] Buscar una frase presente en uno de los archivos subidos; verificar highlight con
-      `<mark>`, paginación y el badge de latencia (`tookMs` y `X-Response-Time`).
+      `<mark>`, paginación y el texto de latencia (`tookMs` y `X-Response-Time`).
 - [ ] Abrir el visor desde un resultado; verificar metadatos, cuerpo renderizado (Markdown) y
       etiqueta de estado.
 - [ ] Subir `docs/samples/sample-blank.pdf` y provocar un estado ERROR con motivo

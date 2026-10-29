@@ -8,9 +8,9 @@ export interface StatusPresentation {
 }
 
 const PRESENTATION: Record<DocumentStatus, StatusPresentation> = {
-  [DocumentStatus.PROCESSING]: { label: 'PROCESANDO', tone: 'info' },
-  [DocumentStatus.INDEXED]: { label: 'INDEXADO', tone: 'success' },
-  [DocumentStatus.ERROR]: { label: 'ERROR', tone: 'danger' },
+  [DocumentStatus.PROCESSING]: { label: 'Procesando', tone: 'info' },
+  [DocumentStatus.INDEXED]: { label: 'Indexado', tone: 'success' },
+  [DocumentStatus.ERROR]: { label: 'Error', tone: 'danger' },
 };
 
 /** Maps the API status enum to its Spanish label and visual tone. */
