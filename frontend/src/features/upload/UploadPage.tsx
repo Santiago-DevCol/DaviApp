@@ -6,6 +6,7 @@ import {
 } from '@techdocs/shared';
 import { useCallback, useMemo, useState } from 'react';
 import { describeError } from '@/api/client';
+import { inspectDocuments } from '@/api/documents.api';
 import { FileDropzone } from '@/components/organisms/FileDropzone';
 import { Button } from '@/components/atoms';
 import { ErrorState } from '@/components/molecules';
@@ -13,6 +14,7 @@ import { useToasts } from '@/features/notifications/ToastContext';
 import { formatBytes, stripExtension } from '@/lib/format';
 import { MetadataForm } from './components/MetadataForm';
 import { TrackedUploadsList } from './components/TrackedUploadsList';
+import { applySuggestion, recordUserEdit, type SuggestibleEntry } from './suggestions';
 import { useTrackedUploads } from './useTrackedUploads';
 import { useUploadDocuments } from './useUploadDocuments';
 import {
@@ -25,11 +27,10 @@ import {
   type MetadataErrors,
 } from './validation';
 
-interface PendingFile {
+interface PendingFile extends SuggestibleEntry {
   key: string;
   file: File;
   fileError: string | null;
-  metadata: DocumentMetadataInput;
 }
 
 let nextKey = 0;
@@ -52,10 +53,11 @@ export function summarizeAccepted(items: UploadAcceptedItem[]): { title: string;
 }
 
 function createPending(file: File, defaults: Partial<DocumentMetadataInput>): PendingFile {
+  const fileError = validateFile(file);
   return {
     key: `${Date.now()}-${nextKey++}`,
     file,
-    fileError: validateFile(file),
+    fileError,
     metadata: {
       title: stripExtension(file.name),
       author: defaults.author ?? '',
@@ -63,6 +65,9 @@ function createPending(file: File, defaults: Partial<DocumentMetadataInput>): Pe
       tags: [],
       version: defaults.version ?? '1.0.0',
     },
+    touched: {},
+    suggestedFrom: {},
+    inspection: fileError === null ? 'pending' : 'skipped',
   };
 }
 
@@ -88,8 +93,30 @@ export function UploadPage() {
       const last = pending[pending.length - 1]?.metadata;
       const room = Math.max(0, MAX_FILES_PER_UPLOAD - pending.length);
       const defaults = { author: last?.author, category: last?.category, version: last?.version };
+      const added = files.slice(0, room).map((file) => createPending(file, defaults));
       setOmitted(Math.max(0, files.length - room));
-      setPending([...pending, ...files.slice(0, room).map((file) => createPending(file, defaults))]);
+      setPending([...pending, ...added]);
+
+      // Ask the backend for metadata suggestions once per batch; the form
+      // stays usable meanwhile and a failure only adds an inline note.
+      const inspectable = added.filter((item) => item.inspection === 'pending');
+      if (inspectable.length === 0) return;
+      const indexByKey = new Map(inspectable.map((item, index) => [item.key, index]));
+      inspectDocuments(inspectable.map((item) => item.file)).then(
+        (response) =>
+          setPending((current) =>
+            current.map((entry) => {
+              const index = indexByKey.get(entry.key);
+              if (index === undefined) return entry;
+              const item = response.items[index];
+              return item ? applySuggestion(entry, item) : { ...entry, inspection: 'failed' };
+            }),
+          ),
+        () =>
+          setPending((current) =>
+            current.map((entry) => (indexByKey.has(entry.key) ? { ...entry, inspection: 'failed' } : entry)),
+          ),
+      );
     },
     [pending],
   );
@@ -161,10 +188,13 @@ export function UploadPage() {
                 value={item.metadata}
                 errors={showErrors ? (errorsByKey.get(item.key) ?? {}) : {}}
                 fileError={item.fileError}
+                pages={item.pages}
+                inspection={item.inspection}
+                suggestedFrom={item.suggestedFrom}
                 disabled={upload.isPending}
                 onChange={(metadata) =>
                   setPending((current) =>
-                    current.map((entry) => (entry.key === item.key ? { ...entry, metadata } : entry)),
+                    current.map((entry) => (entry.key === item.key ? recordUserEdit(entry, metadata) : entry)),
                   )
                 }
                 onRemove={() => setPending((current) => current.filter((entry) => entry.key !== item.key))}

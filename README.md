@@ -55,6 +55,10 @@ pnpm --filter frontend dev               # http://localhost:5173, proxies /api -
 
 Seed from the host (writes files to `backend/storage`): `pnpm --filter backend db:seed -- --count 300 --reset`.
 
+Backend environment (`backend/.env.example`): `DATABASE_URL`, `PORT`, `NODE_ENV`,
+`MAX_FILE_SIZE_BYTES`, `STORAGE_DIR`, `CORS_ORIGIN`, plus the sweeper settings
+`STALE_PROCESSING_MINUTES` (default `15`) and `SWEEP_CRON` (default `*/5 * * * *`).
+
 ## Tests
 
 ```sh
@@ -70,6 +74,7 @@ Base URL: `http://localhost:3000` (direct) or `http://localhost:8080/api` (throu
 | Method | Path             | Purpose                                                       |
 | ------ | ---------------- | ------------------------------------------------------------- |
 | POST   | `/documents`     | Upload 1-20 files with metadata; returns `202 Accepted`       |
+| POST   | `/documents/inspect` | Multipart `files` only; `200 InspectResponse` with suggested metadata; nothing is persisted |
 | GET    | `/documents/:id` | Metadata, status and extracted text of one document           |
 | GET    | `/search`        | Full-text search (latest versions only) with pagination and highlights |
 | GET    | `/events`        | SSE stream of document status changes                         |
@@ -93,6 +98,36 @@ moves it to `INDEXED` (or `ERROR` with `errorMessage`, e.g. a PDF without text).
 Each item carries the effective `version` (the one sent, or an automatic patch
 bump) and, when nothing was created because the same bytes already exist,
 `duplicateOf: { id, version }` pointing at the existing document.
+
+### Atomic uploads
+
+For each accepted file the `documents` row, the supersede of the previous
+version and the pg-boss job are written in **one PostgreSQL transaction** on
+the same connection (pg-boss `send(..., { db })`), under a per-identity
+advisory lock, so a row never exists without its job and concurrent uploads of
+the same identity are serialized. The file itself is written before the
+transaction and deleted if it fails. A pg-boss scheduled job (`SWEEP_CRON`,
+default every 5 minutes) settles documents stuck in `PROCESSING` for longer than
+`STALE_PROCESSING_MINUTES` (default 15) as `ERROR` with `"Indexing timed out"`
+and removes stored files older than an hour that no row references.
+
+### POST /documents/inspect
+
+Same multipart shape as the upload but with `files` parts only. Returns, per
+file, metadata suggestions read from the file (PDF info dictionary, Markdown
+front matter, or a heuristic such as the first H1) so the upload form can be
+prefilled. Nothing is stored or queued.
+
+```sh
+curl -F files=@docs/samples/sample-manual.md http://localhost:8080/api/documents/inspect
+# 200 {"items":[{"fileName":"sample-manual.md","format":"md","sizeBytes":...,"source":"front-matter",
+#       "suggested":{"title":"Manual de operación: grúa torre GT-120","author":"Departamento de Equipos Industriales",
+#                    "category":"manuals","tags":["crane","safety","operations"],"version":"2.1.0"}}]}
+```
+
+`source` is one of `pdf-info`, `front-matter`, `heuristic` or `none` (title
+guessed from the file name). PDFs also report `pages`. The frontend fills only
+fields the user has not edited.
 
 ### Versioning
 
@@ -164,8 +199,9 @@ docker-compose.yml  postgres + backend + frontend (+ opt-in seed profile)
 
 ## Sample documents
 
-`docs/samples/` contains `sample-manual.md`, `sample-spec.txt`, `sample-guide.pdf`
-and `sample-blank.pdf`. The blank PDF has no extractable text and ends in
+`docs/samples/` contains `sample-manual.md` (with YAML front matter),
+`sample-spec.txt`, `sample-guide.pdf` (with PDF info metadata) and
+`sample-blank.pdf`; the first three prefill the upload form. The blank PDF has no extractable text and ends in
 `ERROR` with `"El documento no contiene texto extraíble. Verifica que el archivo tenga contenido de texto."`, which demonstrates the failure path
 in the UI and over SSE.
 

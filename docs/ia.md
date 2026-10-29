@@ -44,11 +44,12 @@ describe en la sección 4 y en el recorrido previo a la sustentación.
 | Implementación TDD (fases 2-4) | Dominio, casos de uso y adaptadores de `documents`, `search` y `notifications`, escribiendo primero la especificación que falla | Sesión orquestadora: re-ejecutó las suites tras cada fase; revisiones y refutaciones independientes antes de cada corrección |
 | Pruebas de integración | Suite con Testcontainers para `PostgresSearchEngine`, incluida la aserción sobre `EXPLAIN` | Sesión orquestadora: reprodujo el `EXPLAIN (ANALYZE)` contra el Postgres del stack Docker |
 | Scripts de seed y bench | `backend/scripts/seed.ts` (300 documentos sintéticos reproducibles), `bench-search.ts`, `generate-sample-pdfs.ts` | Sesión orquestadora: reprodujo el bench contra el stack Docker; esas son las cifras de `architecture.md` |
-| Frontend (fase 5) | SPA React + Vite: carga con metadatos por archivo, búsqueda con highlight seguro y paginación, visor con Markdown, SSE con parche de caché y toasts; 44 pruebas en 10 archivos al cerrar la fase (98 pruebas en 19 archivos tras el rediseño de la fase 8 y su ronda de revisión; 108 pruebas en 20 archivos tras integrar el versionado de la iteración 2) | Sesión orquestadora: navegó la aplicación en el stack Docker (búsqueda con resaltado y latencia, visor, página de carga, indicador SSE); candidato: recorrido manual de la sección 5 antes de la sustentación |
+| Frontend (fase 5) | SPA React + Vite: carga con metadatos por archivo, búsqueda con highlight seguro y paginación, visor con Markdown, SSE con parche de caché y toasts; 44 pruebas en 10 archivos al cerrar la fase (98 pruebas en 19 archivos tras el rediseño de la fase 8 y su ronda de revisión; 108 pruebas en 20 archivos tras integrar el versionado de la iteración 2; 115 en 20 tras integrar los metadatos sugeridos de la iteración 3) | Sesión orquestadora: navegó la aplicación en el stack Docker (búsqueda con resaltado y latencia, visor, página de carga, indicador SSE); candidato: recorrido manual de la sección 5 antes de la sustentación |
 | Revisión y refutación | Reviewers independientes por fase; refuters sobre los hallazgos críticos | Sesión orquestadora: aplicó el protocolo (refutar antes de corregir, re-revisar el diff del fix); candidato: informado de cada hallazgo y de su corrección |
 | Documentación (fase 6) | Borradores de `docs/architecture.md`, `docs/ia.md` y `README.md` a partir del plan, el código y el log; el agente listó las afirmaciones que no pudo verificar | Sesión orquestadora: corrigió cifras y conteos con los valores reproducidos; candidato: revisión final y responsabilidad del contenido en la sustentación |
 | Iteración 2: versionado por contenido | A partir de las cuatro mejoras propuestas por el candidato, la IA presentó alcance, riesgo y esfuerzo de cada una; implementó la elegida (identidad `document_key`, huella `content_hash`, semver tolerante, `is_latest`, búsqueda solo de la última versión, historial en el visor) con TDD, migración con backfill y suite de integración propia; redactó el roadmap de las tres restantes | Candidato: decidió implementar solo el versionado y posponer las otras tres por plazo; fijó la semántica tras discusión (duplicado ≠ patch). Sesión orquestadora: re-ejecutó suites y lint, lanzó revisión y refutación independientes (sección 4.2) y verificó el flujo contra el stack Docker |
 | Rediseño visual (fase 8) | Claude Design produjo el lienzo de cinco mesas de trabajo (sección 1). Claude Code, en modo plan, exploró el frontend con dos sub-agentes y redactó el plan con un tercero; después cuatro agentes escritores en secuencia implementaron las unidades (tokens semánticos y modo noche, átomos y moléculas, estado como punto y palabra, shell con rail lateral, búsqueda, carga, lector con índice, documentación), cada una en orden TDD y con un commit convencional. Al integrar la rama con el versionado de la iteración 2, la lista de cargas (duplicados, versión asignada), el historial de versiones y el aviso de versión antigua se portaron al sistema de tokens conservando su comportamiento y sus pruebas | Candidato: revisó y aprobó el lienzo antes de implementar y fijó dos requisitos (responsive de primera clase y registro de las herramientas en la documentación). Sesión orquestadora: contrastó cada entrega con el diff, re-ejecutó la suite (98 pruebas en 19 archivos tras la ronda de revisión; 108 en 20 tras integrar el versionado), `tsc --noEmit`, `vite build` y `docker compose build frontend`, barrió el código en busca de clases de la paleta original y recorrió la aplicación a 375, 768 y 1280 px en modo día y noche |
+| Iteración 3: atomicidad, sweeper y metadata sugerida | Con el contrato compartido definido primero (`packages/shared`: `InspectResponse`, `UnitOfWork`), tres writers en paralelo sobre rutas disjuntas: backend de atomicidad (`DrizzleUnitOfWork`, lock por clave, `markFailedIfProcessing`, sweeper programado con pg-boss, suite de integración contra Postgres y pg-boss reales), backend de inspección (`POST /documents/inspect`, `MetadataExtractor` con extractores PDF/Markdown/texto) y frontend (prellenado sin pisar lo tipeado); un cuarto agente para la documentación | Candidato: eligió implementar los puntos 2 y 3 y dejar el 4 (chunking) en roadmap; eligió transacción única sobre outbox y endpoint separado sobre enriquecer en el worker. Sesión orquestadora: re-ejecutó `pnpm test`, `pnpm lint` y las tres suites de integración; revisión y refutación independientes. El recorrido manual del candidato sobre esta iteración está pendiente (sección 5) |
 
 ## 3. Prompts clave y cómo fueron refinados
 
@@ -152,6 +153,7 @@ Correcciones que surgieron de la revisión independiente, no del agente que escr
 | Al agotarse los reintentos de pg-boss el documento quedaba en `PROCESSING` para siempre y sin evento SSE | CRITICAL | `FailDocumentUseCase` + detección del último intento en `IndexDocumentWorker` (`job.retryCount >= retryLimit`); re-revisado y verificado con prueba unitaria del worker |
 | multer decodificaba los nombres de archivo como latin1 ("Guía técnica.txt" llegaba con mojibake) | Defecto funcional | `defParamCharset: 'utf8'` en `FilesInterceptor` (`documents.controller.ts`) |
 | Iteración 2: la regla de duplicado comparaba contra **cualquier** versión con el mismo hash (`findByKeyAndHash`), así que un documento cuya indexación terminó en `ERROR` no podía volver a subirse con los mismos bytes: el reintento se reportaba como duplicado de la fila fallida | CRITICAL (el refuter no pudo refutarlo) | La regla pasó a consultar solo la última versión vigente (`findLatestByKey`) y a excluir `ERROR`; los bytes de una versión antigua se tratan como rollback. Corregido con TDD (4 specs nuevos en `upload-documents.use-case.spec.ts` y una prueba de integración sobre el repositorio real); re-revisión acotada del fix. Commit `f94e5b4` |
+| Iteración 3: la regla `storage/` del `.gitignore` también ignoraba `backend/src/documents/infrastructure/storage/`; `local-file.storage.ts` nunca había llegado a git y un clon limpio del repositorio publicado en GitHub no compilaba | CRITICAL (hallazgo de un writer al clonar desde GitHub, no de la revisión del diff) | Reglas ancladas a la raíz (`/storage/`, `/backend/storage/`) y archivo añadido; verificado clonando de nuevo. Commit `17fa1c3`. El mismo patrón ya había aparecido en `.dockerignore` en la primera entrega y no se extrapoló a `.gitignore` |
 
 ### 4.3 Errores e incidentes de la IA (divulgación)
 
@@ -200,6 +202,40 @@ barrido de filas estancadas, y chunking de documentos grandes. Qué ocurrió, y 
   `/search` y aparición en "Versiones" del visor. Candidato: tomó las decisiones de alcance y
   semántica; el recorrido manual final sigue siendo suyo (sección 5).
 
+### 4.4b Iteración 3 — atomicidad, sweeper y metadata sugerida
+
+Con el versionado mergeado y en verde, el candidato retomó el roadmap. Qué ocurrió, y quién hizo
+qué:
+
+- **Decisión del candidato.** Implementar los puntos 2 (metadata real desde el archivo) y 3
+  (atomicidad carga + cola, sweeper) y dejar el 4 (chunking) como único punto del roadmap. Para
+  cada uno la IA presentó el fork real y el candidato eligió: **transacción única con pg-boss**
+  frente a outbox (la cola ya vive en Postgres; `send` acepta un `db` externo; el outbox sería
+  una segunda cola delante de una cola), y **endpoint `POST /documents/inspect`** frente a
+  enriquecer solo en el worker (el `document_key` ya está calculado con lo tipeado cuando el
+  worker lee el archivo; el problema es la entrada manual). También se decidió no persistir
+  `pages` (sin migración `0003`), en contra de lo que preveía el plan.
+- **Orquestación.** Primero se cerró el contrato compartido (`packages/shared`: `InspectResponse`,
+  `InspectedFile`, `MetadataSuggestionSource`; puerto `UnitOfWork`) en un commit propio, y
+  después tres writers trabajaron en paralelo sobre rutas disjuntas: atomicidad en
+  `backend/src/documents/**` y `backend/test/`, inspección en `backend/src/inspection/**`, y
+  prellenado en `frontend/src/features/upload/**`. Las reglas de staging por rutas y de
+  `index.lock` de la sección 3.4 fueron las que permitieron que los commits no se pisaran.
+- **Hallazgo de un writer, fuera del diff.** Al clonar el repositorio desde GitHub para partir
+  de un árbol limpio, un writer encontró que faltaba
+  `backend/src/documents/infrastructure/storage/local-file.storage.ts`: la regla `storage/`
+  del `.gitignore` lo había ocultado desde la primera entrega, y el repositorio publicado hasta
+  ese momento **no habría compilado** en la máquina del evaluador. Es el hallazgo más grave de
+  todo el proyecto y no lo detectó ninguna revisión de diff, porque el archivo nunca apareció en
+  un diff; lo detectó un agente que ejecutó el paso "clonar en una carpeta nueva" de la lista de
+  la sección 5. Se corrigió anclando las reglas a la raíz (commit `17fa1c3`).
+- **Validación, con atribución honesta.** Sesión orquestadora: re-ejecutó `pnpm test`,
+  `pnpm lint` y `pnpm --filter backend test:integration` (incluida la nueva
+  `documents-atomicity.integration-spec.ts`, que corre contra Postgres y pg-boss reales) y
+  lanzó revisión y refutación independientes. **El recorrido manual del candidato sobre esta
+  iteración está pendiente** al cierre de este documento: las casillas correspondientes de la
+  sección 5 siguen vacías a propósito.
+
 ### 4.5 Qué no validó la IA
 
 La IA no asistió a la sustentación ni validó el guion de la demo; tampoco ejecutó el recorrido
@@ -245,4 +281,14 @@ se dejan vacías a propósito: solo se marcan tras ejecutar cada paso.
       con el mismo título y autor: nueva versión con bump automático, la anterior desaparece de
       la búsqueda y aparece en "Versiones" del visor con el aviso "Existe una versión más
       reciente".
+- [ ] Prellenado: en Cargar, agregar `docs/samples/sample-manual.md` sin escribir nada y
+      comprobar que título, autor, versión `2.1.0`, categoría `manuals` y etiquetas se rellenan
+      solos con la pista "Sugerido desde el front matter"; agregar `sample-guide.pdf` y ver
+      título/autor desde el PDF y el número de páginas; escribir un título a mano antes de que
+      termine la inspección y comprobar que no se pisa.
+- [ ] Sweeper: comprobar en el log del backend la línea `Stale document sweeper scheduled on
+      "sweep-stale-documents" (*/5 * * * *)`; opcionalmente, en `psql`, retrasar `created_at`
+      de una fila `PROCESSING` 20 minutos y esperar el siguiente tick para verla pasar a `ERROR`
+      con "Indexing timed out" y su evento SSE. La demo de concurrencia (dos cargas simultáneas
+      de la misma identidad) **no es necesaria**: la cubre la suite de integración.
 - [ ] Repasar el checklist del evaluador del PDF ítem por ítem.

@@ -1,3 +1,4 @@
+import { DocumentStatus } from '@techdocs/shared';
 import { Document, DocumentProps } from '../../domain/document';
 import { DocumentRepository } from '../../domain/ports/document.repository';
 
@@ -31,6 +32,32 @@ export class InMemoryDocumentRepository implements DocumentRepository {
       throw new Error(`cannot update missing document ${document.id}`);
     }
     this.rows.set(document.id, snapshot(document));
+  }
+
+  async markFailedIfProcessing(id: string, reason: string, at: Date): Promise<boolean> {
+    if (this.nextUpdateError) {
+      const error = this.nextUpdateError;
+      this.nextUpdateError = null;
+      throw error;
+    }
+    const row = this.rows.get(id);
+    if (!row || row.status !== DocumentStatus.PROCESSING) {
+      return false;
+    }
+    this.rows.set(id, { ...row, status: DocumentStatus.ERROR, errorMessage: reason, content: null, updatedAt: at });
+    return true;
+  }
+
+  async findStaleProcessing(olderThan: Date): Promise<Document[]> {
+    return [...this.rows.values()]
+      .filter((row) => row.status === DocumentStatus.PROCESSING && row.createdAt.getTime() < olderThan.getTime())
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
+      .map(hydrate);
+  }
+
+  async existsByStorageKeys(storageKeys: string[]): Promise<Set<string>> {
+    const known = new Set([...this.rows.values()].map((row) => row.storageKey));
+    return new Set(storageKeys.filter((key) => known.has(key)));
   }
 
   async findByKeyAndHash(documentKey: string, contentHash: string): Promise<Document | null> {
@@ -72,6 +99,18 @@ export class InMemoryDocumentRepository implements DocumentRepository {
 
   failNextUpdateWith(error: Error): void {
     this.nextUpdateError = error;
+  }
+
+  /** Rollback helpers used by `FakeUnitOfWork`. */
+  snapshotRows(): Map<string, DocumentProps> {
+    return new Map([...this.rows.entries()].map(([id, row]) => [id, { ...row, tags: [...row.tags] }]));
+  }
+
+  restoreRows(rows: Map<string, DocumentProps>): void {
+    this.rows.clear();
+    for (const [id, row] of rows) {
+      this.rows.set(id, row);
+    }
   }
 }
 

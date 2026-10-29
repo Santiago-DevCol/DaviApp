@@ -15,4 +15,13 @@ export class RecordingJobQueue implements JobQueue {
     }
     this.enqueued.push(documentId);
   }
+
+  /** Rollback helpers used by `FakeUnitOfWork`. */
+  snapshot(): number {
+    return this.enqueued.length;
+  }
+
+  restore(length: number): void {
+    this.enqueued.length = length;
+  }
 }

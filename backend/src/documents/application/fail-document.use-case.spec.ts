@@ -80,6 +80,23 @@ describe('FailDocumentUseCase', () => {
     expect(publisher.events).toEqual([]);
   });
 
+  it('publishes nothing when the conditional update lost the race against the INDEXED write', async () => {
+    repository.seed(processingDocument({ id: FIXTURE_IDS[0] }));
+    // The read sees PROCESSING, but the row is settled before the UPDATE lands.
+    const markFailedIfProcessing = repository.markFailedIfProcessing.bind(repository);
+    repository.markFailedIfProcessing = async (id, reason, at) => {
+      const racing = repository.get(id)!;
+      racing.markIndexed('finished first');
+      repository.seed(racing);
+      return markFailedIfProcessing(id, reason, at);
+    };
+
+    await useCase.execute(FIXTURE_IDS[0], REASON);
+
+    expect(repository.get(FIXTURE_IDS[0])).toMatchObject({ status: DocumentStatus.INDEXED, content: 'finished first' });
+    expect(publisher.events).toEqual([]);
+  });
+
   it('throws DocumentNotFoundError for an unknown id without publishing anything', async () => {
     await expect(useCase.execute(FIXTURE_IDS[2], REASON)).rejects.toBeInstanceOf(
       DocumentNotFoundError,

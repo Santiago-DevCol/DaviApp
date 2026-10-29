@@ -58,3 +58,99 @@ describe('UploadPage', () => {
     });
   });
 });
+
+describe('UploadPage metadata suggestions', () => {
+  const file = (name: string, type = 'text/plain') => new File(['x'], name, { type });
+
+  it('prefills untouched fields from the inspection and marks them with the source hint', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UploadPage />, { route: '/upload', path: '/upload' });
+
+    await user.upload(screen.getByLabelText('Seleccionar archivos'), file('fm-guide.md', 'text/markdown'));
+
+    expect(await screen.findByDisplayValue('Guía desde front matter')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Autor/)).toHaveValue('Autora FM');
+    expect(screen.getByLabelText(/Versión/)).toHaveValue('3.2.0');
+    expect(screen.getByText('fm')).toBeInTheDocument();
+    expect(screen.getAllByText('Sugerido desde el front matter')).toHaveLength(4);
+    expect(screen.queryByText('Analizando archivos…')).toBeNull();
+  });
+
+  it('shows the page count and the PDF hint for pdf-info suggestions', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UploadPage />, { route: '/upload', path: '/upload' });
+
+    await user.upload(screen.getByLabelText('Seleccionar archivos'), file('manual.pdf', 'application/pdf'));
+
+    expect(await screen.findByText('12 páginas')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Título/)).toHaveValue('Título del PDF');
+    expect(screen.getAllByText('Sugerido desde el PDF')).toHaveLength(2);
+  });
+
+  it('uses the content hint for heuristic suggestions and no hint when there is none', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UploadPage />, { route: '/upload', path: '/upload' });
+
+    await user.upload(screen.getByLabelText('Seleccionar archivos'), [file('heur-notes.txt'), file('plain.txt')]);
+
+    expect(await screen.findByDisplayValue('Título heurístico')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('plain')).toBeInTheDocument();
+    expect(screen.getAllByText(/^Sugerido/)).toHaveLength(1);
+    expect(screen.getByText('Sugerido del contenido')).toBeInTheDocument();
+  });
+
+  it('never overwrites a title the user typed while the inspection was pending', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UploadPage />, { route: '/upload', path: '/upload' });
+
+    await user.upload(screen.getByLabelText('Seleccionar archivos'), file('slow-fm-guide.md', 'text/markdown'));
+    expect(screen.getByText('Analizando archivos…')).toBeInTheDocument();
+    const title = screen.getByLabelText(/Título/);
+    await user.clear(title);
+    await user.type(title, 'Mi título');
+
+    expect(await screen.findByDisplayValue('Autora FM', {}, { timeout: 2000 })).toBeInTheDocument();
+    expect(title).toHaveValue('Mi título');
+    expect(screen.queryByText('Analizando archivos…')).toBeNull();
+    // Only the fields that were actually prefilled carry the hint.
+    expect(screen.getAllByText('Sugerido desde el front matter')).toHaveLength(3);
+  });
+
+  it('keeps the form usable and shows a note when the inspection fails', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UploadPage />, { route: '/upload', path: '/upload' });
+
+    await user.upload(screen.getByLabelText('Seleccionar archivos'), file('fail-doc.txt'));
+
+    expect(await screen.findByText('No se pudieron sugerir metadatos')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Título/)).toHaveValue('fail-doc');
+    expect(screen.getByLabelText(/Título/)).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Enviar 1 archivo' })).toBeInTheDocument();
+  });
+
+  it('prefers the file suggestion over values carried over from the previous file', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UploadPage />, { route: '/upload', path: '/upload' });
+    const input = screen.getByLabelText('Seleccionar archivos');
+
+    await user.upload(input, file('first.txt'));
+    await user.type(screen.getByLabelText(/Autor/), 'Carmen Vega');
+    await user.upload(input, file('fm-second.md', 'text/markdown'));
+
+    expect(await screen.findByDisplayValue('Autora FM')).toBeInTheDocument();
+    const authors = screen.getAllByLabelText(/Autor/);
+    expect(authors[0]).toHaveValue('Carmen Vega');
+    expect(authors[1]).toHaveValue('Autora FM');
+  });
+
+  it('clears the hint once the user edits a suggested field', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UploadPage />, { route: '/upload', path: '/upload' });
+
+    await user.upload(screen.getByLabelText('Seleccionar archivos'), file('manual.pdf', 'application/pdf'));
+    await screen.findByDisplayValue('Título del PDF');
+    await user.type(screen.getByLabelText(/Título/), ' 2');
+
+    expect(screen.getAllByText('Sugerido desde el PDF')).toHaveLength(1);
+  });
+});

@@ -468,18 +468,20 @@ pasar del contador en memoria a una secuencia de base de datos.
 | `backend/src/shared/queue/` | Provider global de pg-boss (esquema `pgboss`) |
 | `backend/drizzle/*.sql` | Migraciones SQL versionadas (`0000_init.sql`, `0001_document_file_name.sql`, `0002_document_versioning.sql`) |
 | `backend/src/documents/domain/` | Agregado `Document` con transiciones, errores con `code` estable, puertos |
-| `backend/src/documents/application/` | `UploadDocuments`, `IndexDocument`, `FailDocument`, `GetDocument`, mappers, fakes |
-| `backend/src/documents/infrastructure/` | Controlador multipart, DTOs class-validator, filtro de errores de dominio, repositorio Drizzle, almacenamiento local, extractor pdf-parse, cola y worker pg-boss, publisher EventEmitter2 |
+| `backend/src/documents/application/` | `UploadDocuments`, `IndexDocument`, `FailDocument`, `GetDocument`, `SweepStaleDocuments`, `SweepOrphanFiles`, mappers, fakes |
+| `backend/src/documents/infrastructure/` | Controlador multipart, DTOs class-validator, filtro de errores de dominio, repositorio Drizzle y `DrizzleUnitOfWork`, almacenamiento local, extractor pdf-parse, cola (transaccional) y worker pg-boss, sweeper programado, publisher EventEmitter2 |
+| `backend/src/inspection/` | Capacidad de inspección previa a la carga: `MetadataSuggestion` (sanitización), puerto `MetadataExtractor`, `InspectFilesUseCase`, extractores PDF/Markdown/texto y `POST /documents/inspect` |
 | `backend/src/search/` | `SearchQuery` (value object), puerto `SearchEngine`, `SearchDocumentsUseCase`, controlador y `PostgresSearchEngine` |
 | `backend/src/notifications/` | `EventReplayBuffer` (dominio), `NotificationsHub`, listener, `EventsController` SSE |
 | `backend/src/health/` | `GET /health` con sonda a la base; 503 si está caída |
-| `backend/test/search.integration-spec.ts`, `backend/test/documents-versioning.integration-spec.ts` | Integración FTS y versionado (backfill, índices, `is_latest`) con Testcontainers |
+| `backend/test/search.integration-spec.ts`, `backend/test/documents-versioning.integration-spec.ts`, `backend/test/documents-atomicity.integration-spec.ts` | Integración FTS, versionado (backfill, índices, `is_latest`) y atomicidad (transacción compartida con pg-boss, lock por clave, sweeper) con Testcontainers |
 | `backend/scripts/` | `migrate.ts`, `seed.ts` (300 docs), `synthetic-documents.ts`, `bench-search.ts`, `generate-sample-pdfs.ts` |
 | `frontend/src/app/` | Router (`/upload`, `/search`, `/documents/:id`), providers (QueryClient, toasts, SSE) |
 | `frontend/src/api/` | Cliente `fetch` tipado con `ApiError`, `EventSource` |
 | `frontend/src/features/{upload,search,viewer,notifications}/` | Hooks contenedores + componentes presentacionales por feature |
 | `frontend/src/components/{atoms,molecules,organisms}/` | Atomic design |
 | `frontend/src/lib/` | `highlight.ts`, `status.ts`, `queryKeys.ts`, `format.ts` |
+| `frontend/src/features/upload/suggestions.ts` | Reglas puras del prellenado (`applySuggestion`, `recordUserEdit`, pistas de origen) |
 | `docs/` | `architecture.md`, `ia.md`, `ia-log.md`, `samples/` |
 
 ## 6. Flujo de estados
@@ -577,12 +579,12 @@ versiones ya reemplazadas nunca influyen en la decisión.
 | Misma identidad, bytes distintos | **Nueva versión**: la anterior pasa a `is_latest = false` (`supersede()`), la nueva es `is_latest = true` | igual que la fila anterior |
 | Identidad nueva | **Documento nuevo**, `is_latest = true` | `{ id, status: PROCESSING, version: <enviada> }` |
 
-Orden de efectos para una versión nueva: `storage.save` → `repository.save(nueva)` →
-`supersede()` + `repository.update(anterior)` → `enqueueIndexDocument`. El reemplazo de la
-anterior ocurre **después** de insertar la nueva para que un fallo en el insert nunca deje una
-identidad sin versión vigente. A partir del insert, cualquier fallo (al reemplazar o al encolar)
-pasa por `failDocumentOnError`: marca la nueva fila en `ERROR` con un motivo público y relanza,
-de modo que nunca queda un documento en `PROCESSING` sin job.
+Orden de efectos para una versión nueva: `storage.save` → (en una sola transacción, bajo un
+lock por identidad) `repository.save(nueva)` → `supersede()` + `repository.update(anterior)` →
+`enqueueIndexDocument`. El reemplazo de la anterior ocurre **después** de insertar la nueva para
+que un fallo en el insert nunca deje una identidad sin versión vigente. Desde la tercera
+iteración los tres pasos de base de datos comparten una transacción (sección 6c): si cualquiera
+falla, no queda fila, ni reemplazo, ni job, y el archivo se borra.
 
 **Por qué "mismo contenido" no es un patch.** La primera propuesta del candidato fue que el
 mismo archivo reenviado generara automáticamente una versión patch. Se descartó tras discutirlo:
@@ -624,11 +626,233 @@ versión nueva, porque lo que se repite es el intento de indexar, no el document
 - Las filas anteriores a la migración conservan `content_hash = ''` (los bytes originales no se
   releen al migrar): nunca se detectan como duplicado, y la primera recarga crea una versión
   nueva sobre ellas.
-- Dos cargas **concurrentes** de la misma identidad no se serializan: ambas pueden leer la misma
-  "última" y quedar las dos con `is_latest = true`. Cierre previsto en el roadmap (sección 9,
-  punto 1) con `pg_advisory_xact_lock(hashtext(document_key))`.
-- Si el proceso cae entre `storage.save` y `repository.save` queda un archivo huérfano en
-  `STORAGE_DIR` sin fila; lo recoge el barrido del roadmap.
+- Los dos límites que esta iteración dejó abiertos (dos cargas concurrentes de la misma identidad
+  podían quedar ambas con `is_latest = true`; un archivo huérfano si el proceso caía entre
+  `storage.save` y el insert) se cerraron en la tercera iteración: lock por identidad y barrido
+  de huérfanos (sección 6c).
+
+## 6c. Atomicidad de la carga y recuperación
+
+Tercera iteración. Cierra el límite estructural que quedó documentado en la primera entrega:
+el `INSERT` en `documents` y el `send` a pg-boss no compartían transacción, así que un crash
+entre ambos dejaba una fila en `PROCESSING` sin job y sin nadie que la rescatara. Alcance:
+ninguna ruta nueva, ningún estado nuevo; cambia **cómo** se escribe, no **qué** se escribe.
+
+### 6c.1 Por qué una sola transacción (y no un outbox)
+
+La cola **ya vive en Postgres**: un job de pg-boss es una fila en `pgboss.job`. pg-boss 12
+acepta `send(name, data, { db })` con un adaptador `Db` externo, y para esa sentencia usa ese
+adaptador en lugar de su propio pool (`manager.js#createJob`). Por tanto, si la fila de
+`documents` y la fila de `pgboss.job` se escriben por la **misma conexión** dentro de un `BEGIN`,
+las dos se confirman o las dos se descartan. No hace falta una tabla intermedia.
+
+| Opción | Cómo | Veredicto |
+|---|---|---|
+| **Transacción única con pg-boss** (elegida) | Un puerto `UnitOfWork.run(fn)` abre la transacción; dentro, repositorio y cola operan sobre la misma conexión | Elimina la ventana "fila sin job" con una sola fuente de verdad y sin tablas nuevas; el coste es plomería en infraestructura (Drizzle y pg-boss compartiendo el cliente) |
+| Outbox clásico | Tabla `outbox` escrita en la misma transacción y un publicador que la lee y encola | Patrón reconocible, pero sería una segunda cola delante de una cola que ya está en Postgres: más código, más latencia (un salto más antes del worker), y la misma garantía que ya da la transacción compartida. Se descartó |
+
+### 6c.2 El puerto y el adaptador
+
+- **Puerto** (`backend/src/documents/domain/ports/unit-of-work.ts`): `UnitOfWork.run(fn)`
+  entrega a `fn` un `TransactionContext` con tres cosas ligadas a la misma transacción: un
+  `DocumentRepository`, un `JobQueue` y `lockDocumentKey(documentKey)`. El dominio y la
+  aplicación no saben qué hay detrás; los fakes de los specs implementan la misma interfaz.
+- **Adaptador** (`backend/src/documents/infrastructure/persistence/drizzle-unit-of-work.ts`,
+  `DrizzleUnitOfWork`): toma un `PoolClient` del `pg.Pool` público de Drizzle
+  (`Database.$client.connect()`), emite `BEGIN`, y construye dos vistas de **esa misma
+  conexión**: `drizzle(client, { schema })` para un `DrizzleDocumentRepository` sin cambios, y
+  `{ executeSql: (text, values) => client.query(text, values) }`, el adaptador `Db` que pg-boss
+  acepta en `send` (`TransactionalPgBossJobQueue`, `pg-boss-job.queue.ts`). Si `fn` lanza,
+  `ROLLBACK` y se relanza; si no, `COMMIT`; en ambos casos `client.release()` en `finally`. Se
+  evita a propósito el campo privado `tx.session.client` de `NodePgTransaction`: todo pasa por
+  API pública de Drizzle, pg y pg-boss.
+
+### 6c.3 Lock por identidad y relectura bajo el lock
+
+`lockDocumentKey` ejecuta `SELECT pg_advisory_xact_lock(hashtext($1))` con el `document_key`.
+El lock es de transacción: se libera con el `COMMIT` o el `ROLLBACK`, nunca hay que soltarlo a
+mano. Dentro del lock, `acceptUnderLock` (`upload-documents.use-case.ts`) **vuelve a leer** la
+última versión (`findLatestByKey`) y decide con ese valor: duplicado, nueva versión o documento
+nuevo. La lectura previa al lock es solo un atajo (un duplicado evidente no escribe archivo ni
+abre transacción); la decisión que cuenta es la de dentro. Así dos cargas concurrentes de la
+misma identidad se serializan: la segunda ve la fila que la primera confirmó, y queda exactamente
+un `is_latest`. Prueba de integración: `serializes two concurrent uploads of the same key:
+versions 1.0.0 and 1.0.1, exactly one latest`.
+
+`hashtext` colapsa la clave a un entero de 32 bits; una colisión solo serializa dos identidades
+sin relación entre sí (una espera a la otra), nunca altera la corrección.
+
+### 6c.4 Orden de efectos
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant UP as UploadDocumentsUseCase
+  participant FS as LocalFileStorage
+  participant UoW as DrizzleUnitOfWork
+  participant PG as PostgreSQL (misma conexión)
+
+  UP->>UP: documentKey, sha256(bytes); findLatestByKey (atajo de duplicado)
+  UP->>FS: save(uuid.ext, buffer)   [fuera de la transacción]
+  UP->>UoW: run(fn)
+  UoW->>PG: BEGIN
+  UoW->>PG: SELECT pg_advisory_xact_lock(hashtext(document_key))
+  UoW->>PG: SELECT ... WHERE document_key = $1 AND is_latest   [relectura bajo el lock]
+  alt misma huella que la última y no ERROR
+    UoW-->>UP: duplicateOf (sin escrituras)
+    UP->>FS: delete(uuid.ext)
+  else nueva versión o documento nuevo
+    UoW->>PG: INSERT documents (PROCESSING, is_latest = true)
+    UoW->>PG: UPDATE documents SET is_latest = false WHERE id = anterior
+    UoW->>PG: INSERT pgboss.job (index-document)   [send con db externo]
+    UoW->>PG: COMMIT
+    UoW-->>UP: { id, status, version }
+  end
+  opt cualquier paso falla
+    UoW->>PG: ROLLBACK
+    UP->>FS: delete(uuid.ext)   [best effort, warn si falla]
+  end
+```
+
+1. El archivo se escribe **antes** de la transacción, fuera de ella: el disco no participa en
+   el `ROLLBACK`, y mantener una transacción abierta mientras se escriben hasta 10 MB alargaría el
+   lock sin motivo. `storageKey` es `<uuid>.<ext>`, así que la escritura es idempotente.
+2. Si la unidad de trabajo falla, `deleteQuietly` borra el archivo; si el borrado también falla
+   se registra un `warn` y lo recoge el barrido de huérfanos. Lo mismo si la relectura bajo el
+   lock concluye que otra carga concurrente ya escribió los mismos bytes: el archivo recién
+   guardado sobra y se borra.
+3. El único hueco que la transacción no cubre es un crash **entre** 1 y 3: queda un archivo sin
+   fila. No queda nunca una fila sin job.
+
+### 6c.5 `markFailedIfProcessing`: cierre de la carrera check-then-write
+
+`FailDocumentUseCase` (`fail-document.use-case.ts`) ya no lee el estado, comprueba y escribe:
+delega en `DocumentRepository.markFailedIfProcessing(id, reason, at)`, que en Drizzle es un solo
+`UPDATE documents SET status = 'ERROR', error_message, content = NULL, updated_at WHERE id = $1
+AND status = 'PROCESSING' RETURNING id` (`drizzle-document.repository.ts`). Devuelve `true` solo
+si una fila cambió; en ese caso se publica el evento SSE. Si entre tanto el worker escribió
+`INDEXED`, el `UPDATE` no toca nada, no se publica nada y el resultado correcto gana. La
+condición la evalúa Postgres de forma atómica, así que vale con varios workers y con el sweeper
+corriendo a la vez. Prueba: `markFailedIfProcessing on an INDEXED row returns false and changes
+nothing`.
+
+### 6c.6 El sweeper
+
+`StaleDocumentsSweeper` (`backend/src/documents/infrastructure/sweeper/stale-documents.sweeper.ts`)
+no usa `@Interval` de Nest sino `boss.schedule(SWEEP_QUEUE, cron)`: la fila del cron vive en la
+base, así que con varias réplicas de la API se crea **un** job por tick y lo procesa una sola;
+la cola es `singleton` (`policy: 'singleton', retryLimit: 0`) para que un barrido lento no se
+acumule, y la siguiente ocurrencia es el reintento. Cada tick ejecuta dos casos de uso:
+
+| Caso de uso | Qué hace | Umbral |
+|---|---|---|
+| `SweepStaleDocumentsUseCase` (`sweep-stale-documents.use-case.ts`) | `findStaleProcessing(now - umbral)` → por cada fila, `FailDocumentUseCase.execute(id, 'Indexing timed out')` (el `UPDATE` condicional anterior, con evento SSE). Un fallo en un documento se registra y no detiene el resto | `STALE_PROCESSING_MINUTES` (por defecto 15; `env.schema.ts`). Está muy por encima de la ventana de reintentos del job (3 reintentos con backoff + `expireInSeconds: 300`), para no competir con un worker vivo |
+| `SweepOrphanFilesUseCase` (`sweep-orphan-files.use-case.ts`) | `storage.listKeysOlderThan(now - 60 min)` → `repository.existsByStorageKeys(claves)` → borra las que no tienen fila | 60 minutos (`ORPHAN_FILE_MINUTES` en `documents.module.ts`). La edad deja fuera las cargas en vuelo (archivo escrito, transacción aún sin confirmar) |
+
+Frecuencia: `SWEEP_CRON` (por defecto `*/5 * * * *`). Ambas variables están en
+`backend/.env.example` y las valida el esquema zod al arrancar.
+
+### 6c.7 Límites de esta iteración
+
+- El umbral del sweeper asume que ninguna indexación legítima dura más de
+  `STALE_PROCESSING_MINUTES`; si un PDF enorme superara ese tiempo con el job aún activo, el
+  sweeper lo marcaría `ERROR` y el worker, al terminar, encontraría la fila fuera de
+  `PROCESSING` y la dejaría tal cual (el job es idempotente). La mitigación es subir la variable;
+  la solución completa sería consultar `pgboss.job` antes de marcar.
+- El lock por `hashtext` puede serializar dos identidades distintas por colisión de hash (ver
+  6c.3). Es una pérdida de paralelismo, no de corrección.
+- El archivo huérfano por crash entre `storage.save` y la transacción sigue existiendo hasta una
+  hora; es el precio de no meter el disco en la transacción.
+
+## 6d. Metadata sugerida (inspección previa a la carga)
+
+Tercera iteración. Antes, el usuario escribía título, autor y versión a mano por cada archivo;
+con el versionado por identidad (6b), un error de tipeo se convierte en otro documento. Ahora el
+formulario se prellena con lo que el archivo ya declara.
+
+### 6d.1 Endpoint y contrato
+
+`POST /documents/inspect` (`backend/src/inspection/infrastructure/http/inspection.controller.ts`):
+multipart con solo las partes `files` (sin `metadata`), mismos límites que la carga (20 archivos,
+10 MB, `defParamCharset: 'utf8'`), responde `200` con `InspectResponse` y **no persiste nada**
+(ni fila, ni archivo, ni job). Por archivo (`packages/shared/src/index.ts`, `InspectedFile`):
+`{ fileName, format, sizeBytes, pages?, source: 'pdf-info' | 'front-matter' | 'heuristic' |
+'none', suggested: { title?, author?, category?, tags?, version? } }`. Los errores reutilizan
+`DomainErrorFilter` de `documents` (400 formato no soportado, 413 demasiado grande), así que el
+frontend trata ambos endpoints igual.
+
+Se eligió un endpoint separado y no "enriquecer en el worker": el worker corre después del 202,
+cuando el `document_key` ya se calculó con lo que el usuario tipeó; el problema de fondo es la
+entrada manual y solo se resuelve antes de enviar.
+
+### 6d.2 Puerto y fuentes
+
+Capacidad propia `backend/src/inspection/` con la misma división hexagonal. Puerto
+`MetadataExtractor.inspect(buffer, format, fileName)` (`domain/ports/metadata-extractor.ts`)
+con el contrato de **no lanzar nunca** por contenido malformado: se degrada al fallback.
+`FormatDispatchingMetadataExtractor` elige el adaptador por formato ya resuelto:
+
+| Formato | Adaptador | Fuente | `source` |
+|---|---|---|---|
+| PDF | `PdfMetadataExtractor` | `PDFParse#getInfo()` (pdf-parse 2.x): `info.Title`, `info.Author`; `total` como `pages`. `Subject`/`Keywords` se ignoran a propósito: rara vez corresponden a categoría/etiquetas del catálogo y generarían sugerencias ruidosas | `pdf-info`; si `info` no trae título ni autor, fallback con `pages` |
+| Markdown | `MarkdownMetadataExtractor` | Front matter YAML con `gray-matter` (`title, author, version, category, tags` como lista o cadena separada por comas); si no hay, el primer `# H1`. YAML inválido se trata como "sin front matter" y se siguen aplicando las heurísticas al cuerpo | `front-matter` / `heuristic` |
+| Texto | `TextMetadataExtractor` | Primera línea no vacía como título, solo si tiene ≤ 120 caracteres (`MAX_HEURISTIC_TITLE_LENGTH`); más larga es un párrafo, no un título | `heuristic` |
+| Cualquiera, sin nada útil | `fileNameFallback` | Nombre de archivo sin extensión, `_`/`-` → espacios | `none` (el título puede venir igualmente, pero `none` le dice al usuario que es una suposición) |
+
+`InspectFilesUseCase` (`application/inspect-files.use-case.ts`) valida todo el lote antes de
+parsear nada (formato por extensión y MIME, tamaño) y envuelve cada extracción en `inspectSafely`:
+un bug en un extractor degrada ese archivo al fallback sin ocultar las sugerencias de los demás.
+
+### 6d.3 Sanitización
+
+`sanitizeSuggestion` (`domain/metadata-suggestion.ts`) usa **los mismos límites que el DTO de
+carga** (`MAX_FIELD_LENGTH = 200`, `MAX_TAGS = 20`, `MAX_TAG_LENGTH = 50`) para que una
+sugerencia siempre sea enviable tal cual: `trim`, eliminación de caracteres de control, espacios
+colapsados, corte a la longitud máxima, etiquetas deduplicadas y sin vacíos. Escalares no
+textuales se convierten a cadena (YAML parsea `2.1` como número); objetos y arrays en campos
+escalares se ignoran.
+
+### 6d.4 Decisión: `pages` se devuelve pero no se persiste
+
+El plan preveía una migración `0003` para guardar `pages` y mostrarlo en el visor. Se decidió no
+hacerlo: `pages` es informativo en el momento de la carga (se muestra en el formulario, con
+`formatPages`), y persistirlo obligaba a una columna, una migración y un cambio de
+`DocumentDetail` por un dato que no participa en búsqueda ni en versionado. Queda como mejora
+barata si el visor lo necesita.
+
+### 6d.5 Reglas del frontend
+
+`frontend/src/features/upload/suggestions.ts`, usado por `UploadPage.tsx` y `MetadataForm.tsx`:
+
+- Al agregar archivos, `UploadPage` llama a `inspectDocuments` (`api/documents.api.ts`) con los
+  archivos válidos; cada entrada lleva `inspection: 'pending' | 'done' | 'failed' | 'skipped'`
+  (`skipped` para los que ya fallaron la validación local).
+- `applySuggestion` rellena **solo campos no tocados** por el usuario (`touched`): los valores
+  por defecto (título desde el nombre de archivo, autor/categoría/versión arrastrados del archivo
+  anterior, etiquetas vacías) cuentan como vacíos y se reemplazan; lo que el usuario escribió,
+  incluso mientras la inspección estaba en vuelo, se conserva. Prioridad: **entrada del usuario >
+  sugerencia > arrastre del archivo anterior**.
+- `recordUserEdit` marca como `touched` cada campo que cambia y retira su pista de origen.
+- Bajo cada campo prellenado se muestra el origen ("Sugerido desde el PDF", "Sugerido desde el
+  front matter", "Sugerido del contenido"); `none` no muestra pista.
+- Si la inspección falla, el formulario sigue usable con los valores por defecto y una nota.
+- Pruebas (`UploadPage.test.tsx`): prellenado de campos no tocados con pista de origen; nunca
+  pisa un título tipeado durante la inspección; formulario usable cuando la inspección falla.
+
+Muestras: `docs/samples/sample-manual.md` lleva front matter (`title`, `author`, `version:
+2.1.0`, `category: manuals`, `tags`) y `sample-guide.pdf` se regeneró con `info.Title/Author`,
+para que la demo del prellenado sea reproducible.
+
+### 6d.6 Límites
+
+- Un PDF sin diccionario `info` (o escaneado) solo aporta `pages` y el título cae al nombre de
+  archivo.
+- `Subject` y `Keywords` del PDF se ignoran (decisión, no omisión).
+- La heurística de texto plano asume que la primera línea corta es un título; una nota de
+  cabecera ("Borrador", una fecha) se ofrecería como título, aunque siempre con pista visible y
+  editable.
+- La inspección añade una petición antes de la carga; para 20 PDF grandes es un parseo adicional
+  en la API (solo el diccionario `info`, no el texto), aceptable para una herramienta interna.
 
 ## 7. Manejo de errores y validación
 
@@ -662,7 +886,15 @@ versión nueva, porque lo que se repite es el intento de indexar, no el document
   `GET /documents/:id`.
 - **Validación de entorno**: esquema zod (`env.schema.ts`) con `DATABASE_URL` obligatoria con
   protocolo `postgres://`, `PORT`, `NODE_ENV`, `MAX_FILE_SIZE_BYTES`, `STORAGE_DIR`,
-  `CORS_ORIGIN`; `backend/.env.example` documenta los valores.
+  `CORS_ORIGIN`, `STALE_PROCESSING_MINUTES` (entero positivo, 15) y `SWEEP_CRON` (cadena no
+  vacía, `*/5 * * * *`); `backend/.env.example` documenta los valores.
+- **Un hallazgo de repositorio, no de código**: la regla `storage/` del `.gitignore` (pensada
+  para el directorio de archivos subidos) también ignoraba
+  `backend/src/documents/infrastructure/storage/`, así que `local-file.storage.ts` nunca llegó a
+  git y un clon limpio del repositorio publicado no compilaba. Se detectó al clonar desde GitHub
+  durante la tercera iteración y se corrigió acotando las reglas a `/storage/` y
+  `/backend/storage/` (anclaje a la raíz; commit `17fa1c3`). El mismo patrón ya había aparecido
+  en `.dockerignore` durante la primera entrega.
 - **Defensas adicionales**: `LocalFileStorage` rechaza claves que no sean `<uuid>.<ext>` y
   comprueba que la ruta resuelta no escape del directorio; el extractor elimina bytes NUL
   (Postgres los rechaza en `text`); multer decodifica nombres de archivo como UTF-8
@@ -672,10 +904,10 @@ versión nueva, porque lo que se repite es el intento de indexar, no el document
 
 | Tipo | Qué cubre | Cómo | Cantidad |
 |---|---|---|---|
-| Unitarias (backend) | Agregado `Document` y transiciones (incluido `supersede`), `buildDocumentKey`, semver tolerante (`parseVersion`, `compareVersions`, `bumpPatch`), resolución de formato, `UploadDocuments` (duplicado, reintento tras `ERROR`, rollback, bump automático, versión mayor respetada, typo = otra identidad, fallo al reemplazar), `IndexDocument`, `FailDocument`, `GetDocument` (historial de versiones), `SearchQuery`, `SearchDocuments`, `EventReplayBuffer`, worker (último intento), `indexing-failure` (mensajes públicos), `error-details`, extractor, `env.schema`, `HttpExceptionFilter`, `HealthController`, `EventsController` | Jest + ts-jest; fakes de puertos en memoria (`__fakes__/`); sin base de datos | Backend: 163 pruebas unitarias/e2e en 21 suites |
-| E2E de controlador (backend) | `DocumentsController` (multipart, validación, 202, 404) y `SearchController` (DTO, filtros, headers) | `@nestjs/testing` + supertest con casos de uso reales sobre fakes | Incluidas en las 21 suites (`*.e2e-spec.ts`) |
-| Integración (backend) | Búsqueda (`search.integration-spec.ts`): ranking título > contenido, mapeo de columnas, acentos y stemming español, frases entre comillas, highlight con `<mark>` y ≤ 2 fragmentos, paginación estable, paginación determinista con 40 filas de rank y fecha idénticos (desempate por `id`), solo `INDEXED`, stopwords, uso del GIN vía `EXPLAIN`, latencia p95 < 1 s sobre 20 consultas. Versionado (`documents-versioning.integration-spec.ts`): índices creados por la migración, backfill SQL == `buildDocumentKey`, búsqueda solo `is_latest`, duplicado sin fila nueva y nueva versión que reemplaza a la anterior contra el repositorio Drizzle real, reintento con los mismos bytes sobre una última versión en `ERROR` | Testcontainers `postgres:16-alpine` o `TEST_DATABASE_URL`; migraciones reales; 300 docs + fixtures | 16 pruebas en 2 suites (11 + 5) en `backend/test/` |
-| Frontend | Validación de carga, `useSearch` (debounce y URL), `SearchPage`, `SearchResultCard`, `useDocumentEvents` (patch de caché, toasts, reconexión y resincronización), `useUploadDocuments` (carrera evento-antes-del-202, alineación de `FormData`, polling), `UploadPage` (límite de 20 archivos), `TrackedUploadsList` (duplicado y versión asignada), `DocumentPage` (ids de `h2`, sin control de descarga, aviso de versión antigua), `MetadataPanel` (historial de versiones) y `OutdatedVersionBanner`, `highlight`, `status`, `theme` (valor guardado, `matchMedia`, conmutador), `AppShell` (rail, modo noche, índice), `markdownOutline`, `TableOfContents`, `StatusDot`, `Button`, `FileDropzone`, `SearchBar` | Vitest + Testing Library + MSW; `EventSource` simulado (`frontend/src/test/mockEventSource.ts`) | 108 pruebas en 20 archivos (`Test Files  20 passed (20)` / `Tests  108 passed (108)`) |
+| Unitarias (backend) | Agregado `Document` y transiciones (incluido `supersede`), `buildDocumentKey`, semver tolerante (`parseVersion`, `compareVersions`, `bumpPatch`), resolución de formato, `UploadDocuments` (duplicado, reintento tras `ERROR`, rollback, bump automático, versión mayor respetada, typo = otra identidad, unidad de trabajo falsa con commit/rollback y borrado del archivo), `IndexDocument`, `FailDocument` (`UPDATE` condicional: sin evento si no cambió nada), `SweepStaleDocuments` y `SweepOrphanFiles` (reloj fijo, umbrales), `GetDocument` (historial de versiones), inspección (`metadata-suggestion`: sanitización y fallback; `metadata-extractors` con fixtures reales: PDF con `info`, MD con y sin front matter, YAML inválido, TXT; `InspectFiles`), `SearchQuery`, `SearchDocuments`, `EventReplayBuffer`, worker (último intento), `indexing-failure` (mensajes públicos), `error-details`, extractor, `env.schema` (incluidas las dos variables del sweeper), `HttpExceptionFilter`, `HealthController`, `EventsController` | Jest + ts-jest; fakes de puertos en memoria (`__fakes__/`); sin base de datos | Backend: 206 pruebas unitarias/e2e en 28 suites |
+| E2E de controlador (backend) | `DocumentsController` (multipart, validación, 202, 404), `InspectionController` (`POST /documents/inspect`: 200 con sugerencias, 400 sin archivos o formato no soportado, 413) y `SearchController` (DTO, filtros, headers) | `@nestjs/testing` + supertest con casos de uso reales sobre fakes | Incluidas en las 28 suites (`*.e2e-spec.ts`) |
+| Integración (backend) | Búsqueda (`search.integration-spec.ts`, 11): ranking título > contenido, mapeo de columnas, acentos y stemming español, frases entre comillas, highlight con `<mark>` y ≤ 2 fragmentos, paginación estable, paginación determinista con 40 filas de rank y fecha idénticos (desempate por `id`), solo `INDEXED`, stopwords, uso del GIN vía `EXPLAIN`, latencia p95 < 1 s sobre 20 consultas. Versionado (`documents-versioning.integration-spec.ts`, 5): índices creados por la migración, backfill SQL == `buildDocumentKey`, búsqueda solo `is_latest`, duplicado sin fila nueva y nueva versión que reemplaza a la anterior contra el repositorio Drizzle real, reintento con los mismos bytes sobre una última versión en `ERROR`. Atomicidad (`documents-atomicity.integration-spec.ts`, 5, contra Postgres **y** pg-boss reales): fila y job confirmados juntos; fallo tras el `INSERT` del job → ni fila, ni job, ni archivo; dos cargas concurrentes de la misma clave → `1.0.0` y `1.0.1` con exactamente un `is_latest`; el sweeper marca `ERROR` una fila de 20 min y deja intacta una de 1 min, con evento SSE; `markFailedIfProcessing` sobre una fila `INDEXED` devuelve `false` y no cambia nada | Testcontainers `postgres:16-alpine` o `TEST_DATABASE_URL`; migraciones reales; 300 docs + fixtures | 21 pruebas en 3 suites (11 + 5 + 5) en `backend/test/` |
+| Frontend | Validación de carga, `useSearch` (debounce y URL), `SearchPage`, `SearchResultCard`, `useDocumentEvents` (patch de caché, toasts, reconexión y resincronización), `useUploadDocuments` (carrera evento-antes-del-202, alineación de `FormData`, polling), `UploadPage` (límite de 20 archivos; prellenado desde la inspección sin pisar lo tipeado, pista de origen, formulario usable si la inspección falla), `TrackedUploadsList` (duplicado y versión asignada), `DocumentPage` (ids de `h2`, sin control de descarga, aviso de versión antigua), `MetadataPanel` (historial de versiones) y `OutdatedVersionBanner`, `highlight`, `status`, `theme` (valor guardado, `matchMedia`, conmutador), `AppShell` (rail, modo noche, índice), `markdownOutline`, `TableOfContents`, `StatusDot`, `Button`, `FileDropzone`, `SearchBar` | Vitest + Testing Library + MSW; `EventSource` simulado (`frontend/src/test/mockEventSource.ts`) | 115 pruebas en 20 archivos (`Test Files  20 passed (20)` / `Tests  115 passed (115)`) |
 
 Comandos: `pnpm test` (unitarias de todos los paquetes), `pnpm --filter backend test:integration`
 (requiere Docker o `TEST_DATABASE_URL`), `pnpm lint` (`tsc --noEmit`).
@@ -685,74 +917,19 @@ Comandos: `pnpm test` (unitarias de todos los paquetes), `pnpm --filter backend 
 Se listan de forma explícita para la sustentación; ninguno impide cumplir el checklist del kata,
 pero todos son preguntas razonables de un evaluador senior. Tras la segunda iteración (sección
 6b) quedaron cerrados el agotamiento de reintentos sin evento (`FailDocumentUseCase`), la
-paginación determinista (desempate por `id`) y la carrera evento-antes-del-202 en el frontend;
-ya no figuran aquí.
+paginación determinista (desempate por `id`) y la carrera evento-antes-del-202 en el frontend.
+Tras la tercera (secciones 6c y 6d) quedaron cerrados la atomicidad carga + cola, el lock por
+identidad, el guard check-then-write, el crash en el último intento (lo recoge el sweeper), el
+archivo huérfano y el prellenado de metadatos. Ninguno figura ya aquí.
 
-### 9.1 Roadmap priorizado
+### 9.1 Roadmap
 
-Son las mejoras que el candidato evaluó junto con el versionado y decidió **no** implementar
-dentro del plazo (entrega jueves 29 de octubre, 11:30). El orden es por valor frente a riesgo:
-el punto 1 cierra un límite estructural que el evaluador va a preguntar; el punto 2 luce en la
-demo; el punto 3 solo tiene sentido si sobra tiempo. Los esfuerzos son estimaciones con el mismo
-flujo de agentes, revisión y refutación usado hasta ahora.
+De las cuatro mejoras que el candidato evaluó tras la entrega inicial, tres están implementadas
+(versionado en 6b; atomicidad y sweeper en 6c; metadata sugerida en 6d). Queda una, que se
+decidió **no** implementar dentro del plazo (entrega jueves 29 de octubre, 11:30) por ser la de
+mayor esfuerzo y menor impacto en el checklist.
 
-#### 1. Atomicidad carga + cola, lock por identidad y barrido de filas estancadas
-
-- **Problema.** `INSERT` en `documents` y `send` a pg-boss no comparten transacción
-  (`upload-documents.use-case.ts`). Si el proceso muere entre ambos queda una fila en
-  `PROCESSING` sin job; `failDocumentOnError` cubre la excepción, no el crash. Relacionados:
-  `FailDocumentUseCase` es check-then-write (seguro con `batchSize: 1`, no con varios workers);
-  un crash dentro del último intento (`expireInSeconds: 300`) deja el documento en `PROCESSING`;
-  dos cargas concurrentes de la misma identidad pueden dejar dos `is_latest`; un fallo entre
-  `storage.save` y el insert deja un archivo huérfano.
-- **Opción recomendada: transacción única con pg-boss.** pg-boss acepta `send(name, data,
-  { db })` con una conexión externa. Un puerto `UnitOfWork.run(fn)` abre `db.transaction` de
-  Drizzle y dentro ejecuta `pg_advisory_xact_lock(hashtext(document_key))`, el insert, el
-  `supersede` de la anterior y el `send`; si algo falla no queda nada escrito. `storage.save`
-  queda fuera (idempotente por `storageKey`) y se borra best effort si la transacción falla.
-  Complemento: `StaleDocumentsSweeper` (intervalo de 5 min) que marca `ERROR` con motivo
-  "Indexing timed out" las filas `PROCESSING` con más de 15 min sin job activo en `pgboss.job`,
-  publica el evento SSE y borra archivos de `STORAGE_DIR` sin fila con más de 1 h; y el guard de
-  `FailDocument` convertido en `UPDATE ... WHERE status = 'PROCESSING'`.
-- **Alternativa descartada: outbox clásico.** Tabla `outbox` escrita en la misma transacción y
-  un publicador que encola. Patrón reconocible, pero es una segunda cola delante de una cola que
-  ya vive en Postgres: más código, más latencia, sin ganancia de consistencia.
-- **Pruebas previstas.** Unitarias con UoW falso (commit/rollback) y sweeper con reloj fijo;
-  integración con Testcontainers: fallo simulado tras el insert → ni fila ni job; sweeper marca
-  `ERROR` y emite evento; dos cargas concurrentes de la misma clave → exactamente un `is_latest`.
-- **Esfuerzo estimado.** ~2.5 h.
-- **Por qué se pospuso.** Es el cambio con más plomería de infraestructura (pg-boss y Drizzle
-  compartiendo la misma transacción) y el que más toca el camino de carga que ya funciona y está
-  probado; con la entrega a menos de un día, el riesgo de regresión pesaba más que el beneficio
-  en la demo. El límite queda documentado y acotado en lugar de abierto a medias.
-
-#### 2. Metadatos reales desde el archivo para prellenar el formulario
-
-- **Problema.** Hoy el usuario escribe título, autor y versión a mano para cada archivo. Los PDF
-  traen `info.Title/Author` y los Markdown pueden traer front matter; ignorarlos genera errores
-  de tipeo que, con el versionado por identidad, se convierten en documentos distintos.
-- **Opción recomendada: `POST /documents/inspect`.** Endpoint síncrono, multipart, mismos
-  límites (20 archivos, 10 MB); devuelve por archivo `{ fileName, suggested: { title?, author?,
-  version?, category?, tags? }, pages?, source: 'pdf-info' | 'front-matter' | 'heuristic' |
-  'none' }` y no persiste nada. Puerto `MetadataExtractor` en el dominio con adaptadores: PDF →
-  `pdf-parse` (`info.Title`, `info.Author`, `numpages`); Markdown → front matter YAML con
-  `gray-matter` y, si no hay, el primer `# H1`; TXT → primera línea no vacía. Sanitización con
-  las mismas longitudes del DTO (200/20/50) y sin caracteres de control. `pages` se persistiría
-  (migración `0003`) para mostrarlo en el visor. El frontend llama a `inspect` al agregar
-  archivos, prellena **solo campos vacíos** (nunca pisa lo que el usuario escribió) y muestra el
-  origen ("sugerido desde el PDF").
-- **Alternativa descartada: enriquecer solo en el worker.** Sin cambios de UI, pero el
-  formulario no se prellena y el usuario sigue tipeando; además la identidad (`document_key`)
-  ya estaría calculada con el valor tipeado cuando el worker leyera el metadato real. Se
-  descartó porque no resuelve el problema de fondo (la entrada manual).
-- **Pruebas previstas.** Unitarias con fixtures reales (PDF con `info`, MD con y sin front
-  matter, TXT); e2e del endpoint; Vitest del prellenado sin pisar valores del usuario.
-- **Esfuerzo estimado.** ~2 h.
-- **Por qué se pospuso.** Añade una ruta, un puerto, dos dependencias y una migración; es
-  visible en la demo pero no cierra ningún requisito del kata ni ningún límite estructural. Se
-  prioriza detrás del punto 1.
-
-#### 3. Documentos grandes: chunking frente a porción indexada
+#### Documentos grandes: chunking frente a porción indexada
 
 - **Problema.** `tsvector` tiene un tope de 1 MB por fila; un archivo de 10 MB con alta
   diversidad léxica lo supera y termina en `ERROR` (hoy con mensaje accionable y sin exponer
@@ -767,15 +944,20 @@ flujo de agentes, revisión y refutación usado hasta ahora.
 - **Alternativa descartada: porción normalizada.** Indexar solo `left(content, 500_000)` en el
   `tsvector`. Una línea de SQL, pero lo que queda fuera no se encuentra y hay que explicárselo al
   usuario; se guarda como mitigación de emergencia, no como solución.
-- **Esfuerzo estimado.** ~3 h (opción A).
+- **Esfuerzo estimado.** ~3 h (opción A), con el mismo flujo de agentes, revisión y refutación
+  usado hasta ahora.
 - **Por qué se pospuso.** Es el punto de mayor esfuerzo y menor impacto en el checklist: el
   caso (documentos de varios MB de texto único) no aparece en la demo y el fallo actual es
-  explícito y controlado. Solo se haría con tiempo sobrante tras los puntos 1 y 2.
+  explícito y controlado. Con la transacción compartida y el sweeper ya en su sitio, era el
+  único cambio que exigía tocar el SQL de búsqueda probado y medido, y el riesgo de regresión
+  en la víspera de la entrega pesaba más que el beneficio.
 
 ### 9.2 Límites que siguen vigentes
 
-1. **Sin transacción entre `INSERT` y `send`, guard check-then-write, crash en el último
-   intento, dos `is_latest` concurrentes y archivo huérfano**: ver roadmap 9.1, punto 1.
+1. **Atomicidad y sweeper** (sección 6c.7): el umbral `STALE_PROCESSING_MINUTES` asume que
+   ninguna indexación legítima lo supera (no se consulta `pgboss.job` antes de marcar); una
+   colisión de `hashtext` serializa dos identidades sin relación (sin pérdida de corrección); un
+   archivo escrito justo antes de un crash sobrevive hasta una hora.
 2. **Los ids del replay buffer reinician en 1 al reiniciar el proceso**
    (`event-replay-buffer.ts`): un `Last-Event-ID` anterior al reinicio no es comparable. El GET
    inicial de `useTrackedUploads` y el poll de 15 s en el visor cubren el hueco en la práctica;
@@ -793,7 +975,12 @@ flujo de agentes, revisión y refutación usado hasta ahora.
    tipográficos (ver 4.4 para la ruta de migración).
 7. **Ejecución en un solo proceso** (API + worker + hub SSE) por simplicidad del demo; la sección
    4 documenta la separación.
-8. **Límite de `tsvector` (1 MB)**: ver roadmap 9.1, punto 3.
+8. **Límite de `tsvector` (1 MB)**: ver roadmap 9.1.
 9. **Versionado** (sección 6b.5): `unaccent` frente a NFD para `ø`/`ß`/`æ` en el backfill;
    filas previas con `content_hash` vacío; misma obra en dos formatos tratada como nueva
-   versión; un typo en el título es otra identidad hasta que exista el prellenado del punto 2.
+   versión; un typo en el título sigue siendo otra identidad (el prellenado de 6d lo reduce,
+   no lo elimina: la sugerencia es editable).
+10. **Metadata sugerida** (sección 6d.6): `pages` se devuelve pero no se persiste; `Subject` y
+    `Keywords` del PDF se ignoran; un PDF sin diccionario `info` solo aporta el nombre de
+    archivo; la heurística de texto plano puede ofrecer como título una primera línea que no lo
+    es.

@@ -4,6 +4,7 @@ import { DocumentStatus } from '@techdocs/shared';
 import request from 'supertest';
 import { HttpExceptionFilter } from '../../../shared/http/http-exception.filter';
 import { FIXTURE_IDS, processingDocument } from '../../application/__fakes__/document.fixture';
+import { FakeUnitOfWork } from '../../application/__fakes__/fake-unit-of-work';
 import { FixedIdGenerator } from '../../application/__fakes__/fixed-id.generator';
 import { InMemoryDocumentRepository } from '../../application/__fakes__/in-memory-document.repository';
 import { InMemoryFileStorage } from '../../application/__fakes__/in-memory-file.storage';
@@ -33,8 +34,8 @@ describe('DocumentsController (e2e)', () => {
     queue = new RecordingJobQueue();
     const uploadDocuments = new UploadDocumentsUseCase({
       repository,
+      unitOfWork: new FakeUnitOfWork(repository, queue),
       storage: new InMemoryFileStorage(),
-      queue,
       idGenerator: new FixedIdGenerator([FIXTURE_IDS[0], FIXTURE_IDS[1], ACCENTED_UPLOAD_ID]),
     });
     const getDocument = new GetDocumentUseCase({ repository });

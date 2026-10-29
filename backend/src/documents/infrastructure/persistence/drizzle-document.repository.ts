@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { DocumentFormat, DocumentStatus } from '@techdocs/shared';
-import { and, desc, eq } from 'drizzle-orm';
-import type { Database } from '../../../shared/database/database.provider';
+import { and, asc, desc, eq, inArray, lt } from 'drizzle-orm';
+import type { DatabaseClient } from '../../../shared/database/database.provider';
 import { DRIZZLE } from '../../../shared/database/database.provider';
 import { documents, DocumentRow, NewDocumentRow } from '../../../shared/database/schema';
 import { Document } from '../../domain/document';
@@ -11,7 +11,7 @@ type DocumentRowWithoutVector = Omit<DocumentRow, 'searchVector'>;
 
 @Injectable()
 export class DrizzleDocumentRepository implements DocumentRepository {
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DatabaseClient) {}
 
   async save(document: Document): Promise<void> {
     await this.db.insert(documents).values(toRow(document));
@@ -37,6 +37,35 @@ export class DrizzleDocumentRepository implements DocumentRepository {
         updatedAt: document.updatedAt,
       })
       .where(eq(documents.id, document.id));
+  }
+
+  async markFailedIfProcessing(id: string, reason: string, at: Date): Promise<boolean> {
+    const updated = await this.db
+      .update(documents)
+      .set({ status: DocumentStatus.ERROR, errorMessage: reason, content: null, updatedAt: at })
+      .where(and(eq(documents.id, id), eq(documents.status, DocumentStatus.PROCESSING)))
+      .returning({ id: documents.id });
+    return updated.length === 1;
+  }
+
+  async findStaleProcessing(olderThan: Date): Promise<Document[]> {
+    const rows = await this.db.query.documents.findMany({
+      where: and(eq(documents.status, DocumentStatus.PROCESSING), lt(documents.createdAt, olderThan)),
+      columns: { searchVector: false },
+      orderBy: [asc(documents.createdAt), asc(documents.id)],
+    });
+    return rows.map(toDomain);
+  }
+
+  async existsByStorageKeys(storageKeys: string[]): Promise<Set<string>> {
+    if (storageKeys.length === 0) {
+      return new Set();
+    }
+    const rows = await this.db
+      .select({ storageKey: documents.storageKey })
+      .from(documents)
+      .where(inArray(documents.storageKey, storageKeys));
+    return new Set(rows.map((row) => row.storageKey));
   }
 
   async findByKeyAndHash(documentKey: string, contentHash: string): Promise<Document | null> {

@@ -1,11 +1,13 @@
 import { DocumentMetadataInput, DocumentStatus } from '@techdocs/shared';
 import { createHash } from 'node:crypto';
+import { Document } from '../domain/document';
 import {
   FileTooLargeError,
   InvalidUploadBatchError,
   UnsupportedDocumentFormatError,
 } from '../domain/errors';
 import { FIXTURE_IDS } from './__fakes__/document.fixture';
+import { FakeUnitOfWork } from './__fakes__/fake-unit-of-work';
 import { FixedIdGenerator } from './__fakes__/fixed-id.generator';
 import { InMemoryDocumentRepository } from './__fakes__/in-memory-document.repository';
 import { InMemoryFileStorage } from './__fakes__/in-memory-file.storage';
@@ -31,16 +33,18 @@ describe('UploadDocumentsUseCase', () => {
   let repository: InMemoryDocumentRepository;
   let storage: InMemoryFileStorage;
   let queue: RecordingJobQueue;
+  let uow: FakeUnitOfWork;
   let useCase: UploadDocumentsUseCase;
 
   beforeEach(() => {
     repository = new InMemoryDocumentRepository();
     storage = new InMemoryFileStorage();
     queue = new RecordingJobQueue();
+    uow = new FakeUnitOfWork(repository, queue);
     useCase = new UploadDocumentsUseCase({
       repository,
+      unitOfWork: uow,
       storage,
-      queue,
       idGenerator: new FixedIdGenerator(FIXTURE_IDS),
       maxFileSizeBytes: MAX_SIZE,
     });
@@ -113,7 +117,7 @@ describe('UploadDocumentsUseCase', () => {
     expect(repository.count()).toBe(0);
   });
 
-  it('marks the document as ERROR and rethrows when the job cannot be enqueued', async () => {
+  it('persists nothing, deletes the stored file and rethrows when the job cannot be enqueued', async () => {
     const failure = new Error('queue unavailable');
     queue.failWith(failure);
 
@@ -121,10 +125,41 @@ describe('UploadDocumentsUseCase', () => {
       failure,
     );
 
-    const stored = repository.get(FIXTURE_IDS[0]);
-    expect(stored?.status).toBe(DocumentStatus.ERROR);
-    expect(stored?.errorMessage).toBe('Failed to enqueue indexing job');
-    expect(storage.files.has(`${FIXTURE_IDS[0]}.md`)).toBe(true);
+    expect(repository.count()).toBe(0);
+    expect(queue.enqueued).toEqual([]);
+    expect(storage.files.size).toBe(0);
+    expect(storage.deleted).toEqual([`${FIXTURE_IDS[0]}.md`]);
+  });
+
+  it('persists nothing and deletes the stored file when the transaction fails to commit', async () => {
+    const failure = new Error('could not serialize access');
+    uow.failCommitWith(failure);
+
+    await expect(useCase.execute({ files: [file('a.md')], metadata: [metadata('a')] })).rejects.toBe(
+      failure,
+    );
+
+    expect(repository.count()).toBe(0);
+    expect(queue.enqueued).toEqual([]);
+    expect(storage.files.size).toBe(0);
+  });
+
+  it('still rethrows the original error when deleting the stored file fails as well', async () => {
+    const failure = new Error('queue unavailable');
+    queue.failWith(failure);
+    storage.failDeleteWith(new Error('EACCES'));
+
+    await expect(useCase.execute({ files: [file('a.md')], metadata: [metadata('a')] })).rejects.toBe(
+      failure,
+    );
+
+    expect(repository.count()).toBe(0);
+  });
+
+  it('serializes the write on the document key inside the transaction', async () => {
+    await useCase.execute({ files: [file('a.md')], metadata: [metadata('Manual')] });
+
+    expect(uow.lockedKeys).toEqual(['manual|ana']);
   });
   describe('versioning by document key', () => {
     const upload = (fileName: string, text: string, meta: DocumentMetadataInput) =>
@@ -294,31 +329,60 @@ describe('UploadDocumentsUseCase', () => {
       expect(repository.get(FIXTURE_IDS[0])?.isLatest).toBe(false);
     });
 
-    it('marks the new version as ERROR and rethrows when the previous version cannot be superseded', async () => {
+    it('leaves the previous version untouched and persists nothing when it cannot be superseded', async () => {
       await upload('v1.txt', 'one', metadata('Manual'));
       const failure = new Error('database unavailable');
       repository.failNextUpdateWith(failure);
 
       await expect(upload('v2.txt', 'two', metadata('Manual'))).rejects.toBe(failure);
 
-      expect(repository.get(FIXTURE_IDS[1])).toMatchObject({
-        status: DocumentStatus.ERROR,
-        errorMessage: 'Failed to supersede previous version',
-        isLatest: true,
-      });
+      expect(repository.count()).toBe(1);
       expect(repository.get(FIXTURE_IDS[0])?.isLatest).toBe(true);
       expect(queue.enqueued).toEqual([FIXTURE_IDS[0]]);
+      expect(storage.files.has(`${FIXTURE_IDS[1]}.txt`)).toBe(false);
     });
 
-    it('marks the new version as ERROR but keeps the previous one superseded when enqueue fails', async () => {
+    it('rolls back the supersede as well when enqueue fails, so the key keeps exactly one latest version', async () => {
       await upload('v1.txt', 'one', metadata('Manual'));
       const failure = new Error('queue unavailable');
       queue.failWith(failure);
 
       await expect(upload('v2.txt', 'two', metadata('Manual'))).rejects.toBe(failure);
 
-      expect(repository.get(FIXTURE_IDS[1])).toMatchObject({ status: DocumentStatus.ERROR, isLatest: true });
-      expect(repository.get(FIXTURE_IDS[0])?.isLatest).toBe(false);
+      expect(repository.count()).toBe(1);
+      expect(repository.get(FIXTURE_IDS[0])?.isLatest).toBe(true);
+      expect(storage.files.has(`${FIXTURE_IDS[1]}.txt`)).toBe(false);
+    });
+
+    it('re-reads the latest version under the lock: a duplicate that appeared meanwhile creates nothing', async () => {
+      // Simulate a concurrent upload that committed between the pre-check and the lock.
+      const racingRepository = repository;
+      let injected = false;
+      const original = uow.run.bind(uow);
+      uow.run = async (fn) =>
+        original(async (ctx) => {
+          if (!injected) {
+            injected = true;
+            await racingRepository.save(
+              Document.create({
+                id: FIXTURE_IDS[2],
+                fileName: 'race.txt',
+                metadata: metadata('Manual'),
+                format: 'txt',
+                sizeBytes: 3,
+                contentHash: sha256('one'),
+              }),
+            );
+          }
+          return fn(ctx);
+        });
+
+      const response = await upload('v1.txt', 'one', metadata('Manual'));
+
+      expect(response.items[0].duplicateOf).toEqual({ id: FIXTURE_IDS[2], version: '1.0.0' });
+      expect(repository.count()).toBe(1);
+      expect(storage.files.size).toBe(0);
+      expect(queue.enqueued).toEqual([]);
     });
   });
 });

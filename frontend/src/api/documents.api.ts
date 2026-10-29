@@ -1,5 +1,21 @@
-import type { DocumentDetail, DocumentMetadataInput, UploadAcceptedResponse } from '@techdocs/shared';
+import type {
+  DocumentDetail,
+  DocumentMetadataInput,
+  InspectResponse,
+  UploadAcceptedResponse,
+} from '@techdocs/shared';
 import { request } from './client';
+
+/**
+ * `POST /documents/inspect` multipart: repeated `files` parts. Returns one
+ * item per file, in the same order, with metadata suggestions. Nothing is
+ * persisted on the server.
+ */
+export function inspectDocuments(files: File[], signal?: AbortSignal): Promise<InspectResponse> {
+  const form = new FormData();
+  for (const file of files) form.append('files', file, file.name);
+  return request<InspectResponse>('/documents/inspect', { method: 'POST', body: form, signal });
+}
 
 export interface UploadDocumentsInput {
   files: File[];

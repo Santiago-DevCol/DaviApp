@@ -6,7 +6,11 @@ import * as schema from './schema';
 
 export const DRIZZLE = Symbol('DRIZZLE');
 
-export type Database = NodePgDatabase<typeof schema>;
+/** Drizzle over the app schema, whatever connection it runs on (pool or a transactional client). */
+export type DatabaseClient = NodePgDatabase<typeof schema>;
+
+/** The app-wide instance: `$client` is the pool, from which the unit of work checks out transactional clients. */
+export type Database = DatabaseClient & { $client: Pool };
 
 /**
  * Location of the SQL migrations. Resolved relative to this file (not to

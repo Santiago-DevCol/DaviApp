@@ -231,3 +231,65 @@ Format per entry: stage, tool, what was asked, what came back, human validation 
   Observed once: when the frontend and backend suites run concurrently on the same machine,
   the `DocumentPage` tests that wait up to 5 s for the lazy Markdown chunk can time out; alone
   the suite is green.
+## 2026-10-29 — Iteration 3: atomicity, stale sweeper and suggested metadata (three writers in parallel, one docs writer)
+
+- **Trigger**: versioning merged and green; the candidate picked up the roadmap.
+- **Candidate decisions**: implement points 2 (real metadata from the file) and 3 (upload +
+  queue atomicity, stale sweeper); point 4 (chunking) stays as the only roadmap item. Forks
+  presented by the AI, chosen by the candidate: one shared transaction with pg-boss instead of an
+  outbox (the queue already lives in Postgres and `send` accepts an external `db`; an outbox
+  would be a second queue in front of a queue); a separate `POST /documents/inspect` instead of
+  enriching only in the worker (the `document_key` is already computed from typed input by the
+  time the worker reads the file). Deviation from the plan: `pages` is returned by the
+  inspection but not persisted (no migration `0003`).
+- **Orchestration**: the shared contract was committed first (`packages/shared`:
+  `InspectResponse`, `InspectedFile`, `MetadataSuggestionSource`; port `UnitOfWork`), then three
+  writers ran in parallel on disjoint paths: atomicity (`backend/src/documents/**`,
+  `backend/test/`), inspection (`backend/src/inspection/**`) and prefill
+  (`frontend/src/features/upload/**`). Path-scoped staging and the `index.lock` rule kept the
+  commits from colliding.
+- **What came back**:
+  - `UnitOfWork` port + `DrizzleUnitOfWork` (one `PoolClient`, `BEGIN`, Drizzle and pg-boss on
+    the same client through `{ executeSql }`, `COMMIT`/`ROLLBACK`, release);
+    `pg_advisory_xact_lock(hashtext(document_key))` with a re-read of the latest version under
+    the lock; file written before the transaction and deleted on failure;
+    `markFailedIfProcessing` as a single conditional `UPDATE`; `StaleDocumentsSweeper` as a
+    pg-boss scheduled singleton job (`SWEEP_CRON`, default every 5 min) running
+    `SweepStaleDocumentsUseCase` (`STALE_PROCESSING_MINUTES`, default 15) and
+    `SweepOrphanFilesUseCase` (files older than 60 min with no row).
+  - `inspection` capability: `MetadataExtractor` port, PDF (`PDFParse#getInfo`), Markdown
+    (`gray-matter` front matter, then first H1), text (first short line), file-name fallback with
+    `source: 'none'`; sanitization with the DTO limits (200/20/50).
+  - Frontend: `suggestions.ts` (`applySuggestion` fills only untouched fields; user input >
+    suggestion > carry-over), source hints, inspection states.
+  - Samples: `sample-manual.md` with front matter, `sample-guide.pdf` regenerated with PDF info.
+- **Finding by a writer, outside any diff**: cloning the repository from GitHub into a fresh
+  folder showed that `backend/src/documents/infrastructure/storage/local-file.storage.ts` was
+  missing: the `storage/` rule in `.gitignore` had hidden the source folder since the first
+  delivery, so the pushed repository at that time would not have built. No diff review could
+  catch it because the file never appeared in a diff. Fixed by anchoring the rules
+  (`/storage/`, `/backend/storage/`) and adding the file (commit `17fa1c3`). The same pattern
+  had already bitten `.dockerignore` on day one and was not extrapolated to `.gitignore`.
+- **Verification by the orchestrator session**: `pnpm test`, `pnpm lint` and
+  `pnpm --filter backend test:integration` re-run; independent review and refutation. Totals
+  after the iteration: backend 201 unit/e2e tests in 27 suites; 21 integration tests in 3 suites
+  (search 11, versioning 5, atomicity 5); frontend 61 tests in 12 files.
+- **Pending**: the candidate's manual walkthrough of this iteration (prefill demo with
+  `sample-manual.md`, sweeper log line) is still open in `docs/ia.md` section 5; the concurrency
+  demo is not required because the integration suite covers it.
+
+## 2026-10-29 — Merge (2): visual redesign rebased on Iteration 3
+
+- **What happened**: `feat/calm-ui` was merged with `origin/main` again after Iteration 3
+  (atomic uploads, stale sweeper, suggested metadata) had landed there. Four files conflicted:
+  the three docs and `MetadataForm`.
+- **Resolution rule**: main's behaviour, props, strings, aria attributes and tests win; the
+  token-based visual system wins. The metadata card kept its two-column grid (title and tags
+  spanning both columns, 44 px controls, "Quitar" quiet button) and gained main's suggestion
+  hints under each field, the page count next to the size, and the "Analizando archivos…" /
+  "No se pudieron sugerir metadatos" status notes, restyled from the stock palette to
+  `text-ink-label` / `text-busy`. `UploadPage`, `suggestions.ts`, `documents.api.ts`, the MSW
+  handlers and the upload tests merged without conflict and carry no stock-palette class.
+- **Verification**: `pnpm --filter frontend lint` (`tsc --noEmit`) clean, `vite build` OK,
+  backend `Test Suites: 28 passed, 28 total` / `Tests: 206 passed, 206 total` (unit/e2e only);
+  frontend `Test Files  20 passed (20)` / `Tests  115 passed (115)`.
