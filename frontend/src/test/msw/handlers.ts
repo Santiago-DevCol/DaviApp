@@ -22,6 +22,38 @@ export const INDEXED_DOC: DocumentDetail = {
   updatedAt: '2026-10-01T10:00:05.000Z',
   content: '# Despliegue\n\nUsa `kubectl apply` para desplegar.\n\n- Paso uno\n- Paso dos',
   errorMessage: null,
+  documentKey: 'guia-de-despliegue-en-kubernetes::equipo-plataforma',
+  isLatest: true,
+  contentHash: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
+  versions: [
+    {
+      id: '11111111-1111-4111-8111-111111111111',
+      version: '2.1.0',
+      status: DocumentStatus.INDEXED,
+      isLatest: true,
+      createdAt: '2026-10-01T10:00:00.000Z',
+    },
+    {
+      id: '11111111-1111-4111-8111-111111111110',
+      version: '2.0.0',
+      status: DocumentStatus.INDEXED,
+      isLatest: false,
+      createdAt: '2026-09-01T10:00:00.000Z',
+    },
+  ],
+};
+
+/** Previous version of `INDEXED_DOC` (same document key, superseded). */
+export const OLD_VERSION_DOC: DocumentDetail = {
+  ...INDEXED_DOC,
+  id: '11111111-1111-4111-8111-111111111110',
+  version: '2.0.0',
+  fileName: 'k8s-guide-v2.md',
+  createdAt: '2026-09-01T10:00:00.000Z',
+  updatedAt: '2026-09-01T10:00:05.000Z',
+  content: '# Despliegue (anterior)\n\nVersión previa de la guía.',
+  isLatest: false,
+  contentHash: '1b4f0e9851971998e732078544c96b36c3d01cedf7caa332359d6f1d83567014',
 };
 
 export const PROCESSING_DOC: DocumentDetail = {
@@ -39,6 +71,18 @@ export const PROCESSING_DOC: DocumentDetail = {
   updatedAt: '2026-10-02T10:00:00.000Z',
   content: null,
   errorMessage: null,
+  documentKey: 'especificacion-de-carga::ana-ruiz',
+  isLatest: true,
+  contentHash: '60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752',
+  versions: [
+    {
+      id: '22222222-2222-4222-8222-222222222222',
+      version: '1.0.0',
+      status: DocumentStatus.PROCESSING,
+      isLatest: true,
+      createdAt: '2026-10-02T10:00:00.000Z',
+    },
+  ],
 };
 
 export const SEARCH_FIXTURE: SearchResponse = {
@@ -68,6 +112,7 @@ export function resetFixtures(): void {
   documents.clear();
   documents.set(INDEXED_DOC.id, { ...INDEXED_DOC });
   documents.set(PROCESSING_DOC.id, { ...PROCESSING_DOC });
+  documents.set(OLD_VERSION_DOC.id, { ...OLD_VERSION_DOC });
 }
 
 export function setDocument(document: DocumentDetail): void {

@@ -4,6 +4,7 @@ import { ApiClientError, describeError } from '@/api/client';
 import { Spinner } from '@/components/atoms';
 import { EmptyState, ErrorState } from '@/components/molecules';
 import { DocumentBody } from './components/DocumentBody';
+import { OutdatedVersionBanner } from './components/OutdatedVersionBanner';
 import { MetadataPanel } from './components/MetadataPanel';
 import { StatusBanner } from './components/StatusBanner';
 import { useDocument } from './useDocument';
@@ -56,6 +57,7 @@ export function DocumentPage() {
           </header>
 
           <StatusBanner status={query.data.status} errorMessage={query.data.errorMessage} />
+          <OutdatedVersionBanner document={query.data} />
 
           <div className="grid gap-4 lg:grid-cols-[1fr_18rem]">
             <article className="order-2 min-w-0 rounded-lg border border-slate-200 bg-white p-4 lg:order-1 lg:p-6">
