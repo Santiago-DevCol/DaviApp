@@ -7,6 +7,9 @@ import { InMemoryFileStorage } from './__fakes__/in-memory-file.storage';
 import { RecordingEventPublisher } from './__fakes__/recording-event.publisher';
 import { IndexDocumentUseCase } from './index-document.use-case';
 
+const GENERIC_PUBLIC_REASON =
+  'No se pudo indexar el documento. Verifica que el archivo no esté dañado e intenta nuevamente.';
+
 describe('IndexDocumentUseCase', () => {
   let repository: InMemoryDocumentRepository;
   let storage: InMemoryFileStorage;
@@ -65,28 +68,48 @@ describe('IndexDocumentUseCase', () => {
     });
   });
 
-  it('marks the document as ERROR and does not rethrow when extraction fails', async () => {
+  it('marks the document as ERROR with a public reason and does not rethrow when extraction fails', async () => {
     extractor.throws(new TextExtractionError('Could not parse PDF: Invalid PDF structure'));
 
     await expect(useCase.execute(FIXTURE_IDS[0])).resolves.toBeUndefined();
 
-    expect(repository.get(FIXTURE_IDS[0])?.status).toBe(DocumentStatus.ERROR);
-    expect(repository.get(FIXTURE_IDS[0])?.errorMessage).toBe(
-      'Could not parse PDF: Invalid PDF structure',
-    );
+    const stored = repository.get(FIXTURE_IDS[0]);
+    expect(stored?.status).toBe(DocumentStatus.ERROR);
+    expect(stored?.errorMessage).toBe(GENERIC_PUBLIC_REASON);
+    expect(stored?.errorMessage).not.toContain('Invalid PDF structure');
     expect(publisher.events[0]).toMatchObject({
       status: DocumentStatus.ERROR,
-      errorMessage: 'Could not parse PDF: Invalid PDF structure',
+      errorMessage: GENERIC_PUBLIC_REASON,
     });
   });
 
-  it('marks the document as ERROR when the stored file is missing', async () => {
+  it('marks the document as ERROR with a public reason when the stored file is missing', async () => {
     storage.files.clear();
 
     await useCase.execute(FIXTURE_IDS[0]);
 
-    expect(repository.get(FIXTURE_IDS[0])?.status).toBe(DocumentStatus.ERROR);
-    expect(repository.get(FIXTURE_IDS[0])?.errorMessage).toMatch(/ENOENT/);
+    const stored = repository.get(FIXTURE_IDS[0]);
+    expect(stored?.status).toBe(DocumentStatus.ERROR);
+    expect(stored?.errorMessage).toBe(GENERIC_PUBLIC_REASON);
+    expect(stored?.errorMessage).not.toContain('ENOENT');
+    expect(publisher.events[0]).toMatchObject({
+      status: DocumentStatus.ERROR,
+      errorMessage: GENERIC_PUBLIC_REASON,
+    });
+  });
+
+  it('logs the internal failure detail without storing it', async () => {
+    const logger = { warn: jest.fn() };
+    useCase = new IndexDocumentUseCase({ repository, storage, extractor, publisher, logger });
+    extractor.throws(new TextExtractionError('Could not parse PDF: Invalid PDF structure'));
+
+    await useCase.execute(FIXTURE_IDS[0]);
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const logged = logger.warn.mock.calls[0][0] as string;
+    expect(logged).toContain(FIXTURE_IDS[0]);
+    expect(logged).toContain('Invalid PDF structure');
+    expect(repository.get(FIXTURE_IDS[0])?.errorMessage).not.toContain('Invalid PDF structure');
   });
 
   it('throws DocumentNotFoundError for an unknown id without publishing anything', async () => {

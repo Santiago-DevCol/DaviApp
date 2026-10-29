@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Env } from '../../shared/config/env.schema';
 import { FailDocumentUseCase } from '../application/fail-document.use-case';
@@ -65,7 +65,14 @@ import { LocalFileStorage } from './storage/local-file.storage';
         storage: FileStorage,
         extractor: TextExtractor,
         publisher: EventPublisher,
-      ) => new IndexDocumentUseCase({ repository, storage, extractor, publisher }),
+      ) =>
+        new IndexDocumentUseCase({
+          repository,
+          storage,
+          extractor,
+          publisher,
+          logger: new Logger(IndexDocumentUseCase.name),
+        }),
     },
     {
       provide: FailDocumentUseCase,

@@ -4,11 +4,7 @@ import { FailDocumentUseCase } from '../../application/fail-document.use-case';
 import { IndexDocumentUseCase } from '../../application/index-document.use-case';
 import { DocumentNotFoundError } from '../../domain/errors';
 import { INDEX_DOCUMENT_JOB_OPTIONS } from './index-document.job';
-import {
-  IndexDocumentJob,
-  IndexDocumentWorker,
-  publicIndexingFailure,
-} from './index-document.worker';
+import { IndexDocumentJob, IndexDocumentWorker } from './index-document.worker';
 
 const DOCUMENT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const CONFIGURED_RETRY_LIMIT = INDEX_DOCUMENT_JOB_OPTIONS.retryLimit as number;
@@ -143,39 +139,6 @@ describe('IndexDocumentWorker.handle', () => {
     expect(errorLog).toHaveBeenCalledWith(
       expect.stringContaining('database still down'),
       expect.anything(),
-    );
-  });
-});
-
-describe('publicIndexingFailure', () => {
-  it('hides the SQL and content of a tsvector overflow', () => {
-    const error = withCause(
-      'Failed query: update "documents" set status = $1\nparams: INDEXED,,term0 term1',
-      new Error('string is too long for tsvector (2779804 bytes, max 1048575 bytes)'),
-    );
-
-    const message = publicIndexingFailure(error);
-
-    expect(message).toContain('demasiado texto');
-    expect(message).not.toContain('update');
-    expect(message).not.toContain('term0');
-    expect(message).not.toContain('tsvector');
-  });
-
-  it('reports a dependency outage without internals', () => {
-    const error = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), {
-      code: 'ECONNREFUSED',
-    });
-
-    const message = publicIndexingFailure(error);
-
-    expect(message).toContain('problema temporal');
-    expect(message).not.toContain('ECONNREFUSED');
-  });
-
-  it('uses a generic message for unknown failures', () => {
-    expect(publicIndexingFailure(new Error('boom'))).toBe(
-      'No se pudo indexar el documento. Verifica que el archivo no esté dañado e intenta nuevamente.',
     );
   });
 });

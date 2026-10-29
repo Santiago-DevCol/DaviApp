@@ -478,7 +478,9 @@ stateDiagram-v2
   log, con los `params` de Drizzle redactados y solo los frames del stack. Si el texto supera
   el límite de 1 MB de `tsvector`, el usuario ve un mensaje accionable en lugar del error de
   la base. Así un job agotado nunca deja un documento en `PROCESSING` sin evento de estado
-  (`index-document.worker.ts`, `fail-document.use-case.ts`).
+  (`index-document.worker.ts`, `fail-document.use-case.ts`). Los fallos de extracción y de
+  almacenamiento en el primer intento también guardan un motivo público sanitizado
+  (`indexing-failure.ts`) y registran el detalle interno a través del logger del caso de uso.
 - El job es idempotente: si el documento ya no está en `PROCESSING`, se retorna sin tocarlo.
 - La UI traduce los estados a `PROCESANDO / INDEXADO / ERROR` (`frontend/src/lib/status.ts`).
 
@@ -524,8 +526,8 @@ stateDiagram-v2
 
 | Tipo | Qué cubre | Cómo | Cantidad |
 |---|---|---|---|
-| Unitarias (backend) | Agregado `Document` y transiciones, resolución de formato, `UploadDocuments`, `IndexDocument`, `FailDocument`, `GetDocument`, `SearchQuery`, `SearchDocuments`, `EventReplayBuffer`, worker (último intento y mensajes públicos), `error-details`, extractor, `env.schema`, `HttpExceptionFilter`, `HealthController`, `EventsController` | Jest + ts-jest; fakes de puertos en memoria (`__fakes__/`); sin base de datos | Backend: 125 pruebas unitarias/e2e en 18 suites |
-| E2E de controlador (backend) | `DocumentsController` (multipart, validación, 202, 404) y `SearchController` (DTO, filtros, headers) | `@nestjs/testing` + supertest con casos de uso reales sobre fakes | Incluidas en las 18 suites (`*.e2e-spec.ts`) |
+| Unitarias (backend) | Agregado `Document` y transiciones, resolución de formato, `UploadDocuments`, `IndexDocument`, `FailDocument`, `GetDocument`, `SearchQuery`, `SearchDocuments`, `EventReplayBuffer`, worker (último intento), `indexing-failure` (mensajes públicos), `error-details`, extractor, `env.schema`, `HttpExceptionFilter`, `HealthController`, `EventsController` | Jest + ts-jest; fakes de puertos en memoria (`__fakes__/`); sin base de datos | Backend: 127 pruebas unitarias/e2e en 19 suites |
+| E2E de controlador (backend) | `DocumentsController` (multipart, validación, 202, 404) y `SearchController` (DTO, filtros, headers) | `@nestjs/testing` + supertest con casos de uso reales sobre fakes | Incluidas en las 19 suites (`*.e2e-spec.ts`) |
 | Integración (backend) | Ranking título > contenido, mapeo de columnas, acentos y stemming español, frases entre comillas, highlight con `<mark>` y ≤ 2 fragmentos, paginación estable, paginación determinista con 40 filas de rank y fecha idénticos (desempate por `id`), solo `INDEXED`, stopwords, uso del GIN vía `EXPLAIN`, latencia p95 < 1 s sobre 20 consultas | Testcontainers `postgres:16-alpine` o `TEST_DATABASE_URL`; migraciones reales; 300 docs + fixtures | 11 pruebas en `backend/test/search.integration-spec.ts` |
 | Frontend | Validación de carga, `useSearch` (debounce y URL), `SearchPage`, `SearchResultCard`, `useDocumentEvents` (patch de caché, toasts, reconexión y resincronización), `useUploadDocuments` (carrera evento-antes-del-202, alineación de `FormData`, polling), `UploadPage` (límite de 20 archivos), `DocumentPage`, `highlight`, `status` | Vitest + Testing Library + MSW; `EventSource` simulado (`frontend/src/test/mockEventSource.ts`) | 44 pruebas en 10 archivos |
 

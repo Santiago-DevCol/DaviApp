@@ -47,12 +47,29 @@ export function redactQueryParams(message: string): string {
   return message.replace(/(\bparams:\s*)[\s\S]*$/i, '$1[redacted]');
 }
 
+/**
+ * Node prints `error.message` at the top of `stack`, so a message line that
+ * happens to look like a frame (content embedded in Drizzle params, for
+ * instance) must be skipped before filtering: only the text after the message
+ * is inspected. If the message is empty or not found, the whole stack is used.
+ */
 export function errorStackFrames(error: unknown): string | undefined {
   if (!(error instanceof Error) || !error.stack) {
     return undefined;
   }
-  const frames = error.stack.split('\n').filter((line) => /^\s+at /.test(line));
+  const frames = stackAfterMessage(error)
+    .split('\n')
+    .filter((line) => /^\s+at /.test(line));
   return frames.length > 0 ? frames.join('\n') : undefined;
+}
+
+function stackAfterMessage(error: Error): string {
+  const stack = error.stack ?? '';
+  if (!error.message) {
+    return stack;
+  }
+  const messageAt = stack.indexOf(error.message);
+  return messageAt === -1 ? stack : stack.slice(messageAt + error.message.length);
 }
 
 function describe(error: unknown, seen: Set<unknown>, depth: number): string {

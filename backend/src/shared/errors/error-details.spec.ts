@@ -65,4 +65,16 @@ describe('error-details', () => {
     expect(frames).not.toContain('secret');
     expect(frames).not.toContain('hidden');
   });
+
+  it('does not treat message lines that look like frames as stack frames', () => {
+    const error = new Error(
+      'Failed query: update x\nparams: INDEXED,,\n    at the end of the day the params leak',
+    );
+
+    const frames = errorStackFrames(error);
+
+    expect(frames).toContain(' at ');
+    expect(frames).not.toContain('params leak');
+    expect(frames).not.toContain('end of the day');
+  });
 });

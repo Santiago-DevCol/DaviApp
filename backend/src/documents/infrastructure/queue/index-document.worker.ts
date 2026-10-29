@@ -1,9 +1,10 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { Job, PgBoss } from 'pg-boss';
-import { describeError, errorStackFrames, isDependencyUnavailable } from '../../../shared/errors/error-details';
+import { describeError, errorStackFrames } from '../../../shared/errors/error-details';
 import { PG_BOSS } from '../../../shared/queue/pg-boss.provider';
 import { FailDocumentUseCase } from '../../application/fail-document.use-case';
 import { IndexDocumentUseCase } from '../../application/index-document.use-case';
+import { publicIndexingFailure } from '../../application/indexing-failure';
 import { DocumentNotFoundError } from '../../domain/errors';
 import {
   ensureIndexDocumentQueue,
@@ -20,25 +21,6 @@ import {
 export type IndexDocumentJob = Job<IndexDocumentJobData> & { retryLimit?: number };
 
 const MAX_REASON_LENGTH = 300;
-const TSVECTOR_OVERFLOW = /too long for tsvector/i;
-const PUBLIC_FAILURES = {
-  tooLarge:
-    'El documento tiene demasiado texto para el índice de búsqueda. Reduce el tamaño o divídelo en partes.',
-  unavailable:
-    'No se pudo indexar por un problema temporal del servicio. Vuelve a intentarlo en unos minutos.',
-  generic:
-    'No se pudo indexar el documento. Verifica que el archivo no esté dañado e intenta nuevamente.',
-} as const;
-
-export function publicIndexingFailure(error: unknown): string {
-  if (TSVECTOR_OVERFLOW.test(describeError(error))) {
-    return PUBLIC_FAILURES.tooLarge;
-  }
-  if (isDependencyUnavailable(error)) {
-    return PUBLIC_FAILURES.unavailable;
-  }
-  return PUBLIC_FAILURES.generic;
-}
 
 /**
  * Consumes `index-document` jobs one at a time. A thrown error makes pg-boss
