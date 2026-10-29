@@ -30,10 +30,9 @@ describe('SearchPage', () => {
   it('renders results from the API with highlights, total and latency', async () => {
     renderWithProviders(<SearchPage />, { route: '/search?q=kubernetes', path: '/search' });
 
-    expect(await screen.findByRole('link', { name: 'Guía de despliegue en Kubernetes' })).toHaveAttribute(
-      'href',
-      '/documents/11111111-1111-4111-8111-111111111111',
-    );
+    const link = await screen.findByRole('link', { name: 'Guía de despliegue en Kubernetes' });
+    expect(link).toHaveAttribute('href', '/documents/11111111-1111-4111-8111-111111111111');
+    expect(screen.getByRole('list', { name: 'Resultados' })).toContainElement(link);
     expect(screen.getByText('1 resultado para «kubernetes»')).toBeInTheDocument();
     expect(screen.getByText('12 ms')).toBeInTheDocument();
     expect(document.querySelectorAll('mark')).toHaveLength(2);

@@ -15,10 +15,10 @@ export function SearchPage() {
   const backState = { from: `${location.pathname}${location.search}` };
 
   return (
-    <section className="flex flex-col gap-4">
+    <section className="flex max-w-[760px] flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Buscar documentación</h1>
-        <p className="text-sm text-slate-500">Búsqueda de texto completo sobre los documentos indexados.</p>
+        <h1 className="text-[28px] font-bold leading-tight tracking-tight">Buscar</h1>
+        <p className="text-ink-soft">Búsqueda de texto completo sobre los documentos indexados.</p>
       </div>
 
       <SearchBar
@@ -45,14 +45,14 @@ export function SearchPage() {
       )}
 
       {q.length > 0 && search.error == null && search.isPending && (
-        <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
+        <div className="flex items-center gap-2 py-6 text-ink-soft">
           <Spinner size="sm" /> Buscando…
         </div>
       )}
 
       {q.length > 0 && search.error == null && data && (
         <>
-          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 text-[15px]">
             <p aria-live="polite">
               {data.total === 0
                 ? 'Sin resultados'
@@ -67,7 +67,7 @@ export function SearchPage() {
               description="Prueba con otros términos o revisa la ortografía."
             />
           ) : (
-            <ul className="flex flex-col gap-3" aria-busy={search.isFetching || undefined}>
+            <ul aria-label="Resultados" className="border-b border-line" aria-busy={search.isFetching || undefined}>
               {data.items.map((item) => (
                 <li key={item.id}>
                   <SearchResultCard item={item} to={`/documents/${item.id}`} state={backState} />

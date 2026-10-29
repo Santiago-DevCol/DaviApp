@@ -15,26 +15,18 @@ export function Pagination({ page, pageSize, total, onPageChange, disabled = fal
   const last = Math.min(total, page * pageSize);
 
   return (
-    <nav aria-label="Paginación" className="flex flex-wrap items-center justify-between gap-3">
-      <p className="text-xs text-slate-500">
+    <nav aria-label="Paginación" className="flex flex-wrap items-center justify-between gap-3 pt-2">
+      <p className="text-[13px] text-ink-label">
         Mostrando {first}–{last} de {total}
       </p>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="secondary"
-          onClick={() => onPageChange(page - 1)}
-          disabled={disabled || page <= 1}
-        >
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="secondary" onClick={() => onPageChange(page - 1)} disabled={disabled || page <= 1}>
           Anterior
         </Button>
-        <span className="text-xs text-slate-600" aria-current="page">
+        <span className="text-[13px] text-ink-label" aria-current="page">
           Página {page} de {pageCount}
         </span>
-        <Button
-          variant="secondary"
-          onClick={() => onPageChange(page + 1)}
-          disabled={disabled || page >= pageCount}
-        >
+        <Button variant="secondary" onClick={() => onPageChange(page + 1)} disabled={disabled || page >= pageCount}>
           Siguiente
         </Button>
       </div>

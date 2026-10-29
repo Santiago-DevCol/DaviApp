@@ -55,7 +55,7 @@ describe('AppShell', () => {
   it('renders the page inside the main landmark without an outline on the search page', async () => {
     renderApp('/search');
     const main = await screen.findByRole('main');
-    expect(within(main).getByRole('heading', { level: 1, name: 'Buscar documentación' })).toBeInTheDocument();
+    expect(within(main).getByRole('heading', { level: 1, name: 'Buscar' })).toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'En este documento' })).toBeNull();
   });
 });
