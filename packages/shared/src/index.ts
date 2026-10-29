@@ -31,19 +31,39 @@ export interface DocumentSummary extends DocumentMetadataInput {
   fileName: string;
   sizeBytes: number;
   status: DocumentStatus;
+  /** Identity shared by every version of the same work: normalized title + author. */
+  documentKey?: string;
+  /** True for the most recent version of its document key. */
+  isLatest?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DocumentVersionSummary {
+  id: string;
+  version: string;
+  status: DocumentStatus;
+  isLatest: boolean;
+  createdAt: string;
 }
 
 export interface DocumentDetail extends DocumentSummary {
   content: string | null;
   errorMessage?: string | null;
+  /** SHA-256 of the uploaded file bytes; identical bytes are reported as duplicates. */
+  contentHash?: string;
+  /** Every version sharing this document key, newest first (includes this one). */
+  versions?: DocumentVersionSummary[];
 }
 
 export interface UploadAcceptedItem {
   id: string;
   status: DocumentStatus;
   fileName: string;
+  /** Effective version: the one sent, or an automatic patch bump over the latest version. */
+  version?: string;
+  /** Present when the same document key already holds identical bytes; nothing was created. */
+  duplicateOf?: { id: string; version: string };
 }
 
 export interface UploadAcceptedResponse {
